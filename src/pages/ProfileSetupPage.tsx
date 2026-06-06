@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { supabase } from '@/lib/supabase'
@@ -14,8 +14,8 @@ import { trackEvent } from '@/lib/analytics'
 const schema = z.object({
   username: z.string().trim().min(3).max(24),
   platform: z.enum(['Mobile', 'PlayStation', 'Xbox', 'PC']),
-  efootball_id: z.string().trim().min(3).max(32),
-  division: z.string().trim().min(1).max(32),
+  efootball_id: z.string().trim().max(32).optional().or(z.literal('')),
+  division: z.string().trim().max(32).optional().or(z.literal('')),
 })
 
 type ProfileForm = z.infer<typeof schema>
@@ -59,39 +59,55 @@ export const ProfileSetupPage = () => {
 
   return (
     <MobileShell>
-      <Card>
-        <CardHeader>
-          <CardTitle>Complete your profile</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-3" onSubmit={handleSubmit(onSubmit)}>
-            <div className="space-y-1">
-              <Input placeholder="Username" {...register('username')} />
-              {errors.username && <p className="text-xs text-red-400">{errors.username.message}</p>}
-            </div>
-            <div className="space-y-1">
-              <select
-                className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                {...register('platform')}
-              >
-                <option value="Mobile">Mobile</option>
-                <option value="PlayStation">PlayStation</option>
-                <option value="Xbox">Xbox</option>
-                <option value="PC">PC</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Input placeholder="eFootball ID" {...register('efootball_id')} />
-            </div>
-            <div className="space-y-1">
-              <Input placeholder="Division" {...register('division')} />
-            </div>
-            <Button type="submit" disabled={isSubmitting} className="w-full">
-              Save & Enter Lobby
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center justify-center py-8">
+        <div className="w-full max-w-md space-y-6">
+          <div className="space-y-2 text-center">
+            <h1 className="text-3xl font-bold tracking-tight">Setup Profile</h1>
+            <p className="text-sm text-muted-foreground">Complete your player info to enter the matchmaking lobby.</p>
+          </div>
+          
+          <Card className="border-border/50 bg-card/60 shadow-xl backdrop-blur-sm">
+            <CardContent className="pt-6">
+              <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">Username</label>
+                  <Input placeholder="In-game or casual name" className="bg-background/50" {...register('username')} />
+                  {errors.username && <p className="text-xs text-red-500">{errors.username.message}</p>}
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">Gaming Platform</label>
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background/50 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    {...register('platform')}
+                  >
+                    <option value="Mobile">Mobile</option>
+                    <option value="PlayStation">PlayStation</option>
+                    <option value="Xbox">Xbox</option>
+                    <option value="PC">PC</option>
+                  </select>
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">eFootball ID <span className="text-muted-foreground font-normal">(Optional)</span></label>
+                  <Input placeholder="e.g. 123-456-789" className="bg-background/50" {...register('efootball_id')} />
+                  {errors.efootball_id && <p className="text-xs text-red-500">{errors.efootball_id.message}</p>}
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">Current Division <span className="text-muted-foreground font-normal">(Optional)</span></label>
+                  <Input placeholder="e.g. Div 1, Unranked" className="bg-background/50" {...register('division')} />
+                  {errors.division && <p className="text-xs text-red-500">{errors.division.message}</p>}
+                </div>
+                
+                <Button type="submit" disabled={isSubmitting} className="mt-4 w-full gap-2 rounded-full">
+                  Save & Enter Lobby
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </MobileShell>
   )
 }

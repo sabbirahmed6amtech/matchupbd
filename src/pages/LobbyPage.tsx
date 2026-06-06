@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Filter } from 'bad-words'
 import { useNavigate } from 'react-router-dom'
-import { Circle, Plus } from 'lucide-react'
+import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2 } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -207,126 +207,175 @@ export const LobbyPage = () => {
 
   return (
     <MobileShell>
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div>
-          <h1 className="text-xl font-semibold">Lobby</h1>
-          <p className="text-xs text-muted-foreground">Target: find opponent under 30 seconds</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Match Lobby</h1>
+          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+            <Clock className="h-3.5 w-3.5" /> Target: find opponent under 30 seconds
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => navigate(`/profile/${profile?.id}`)}>
-            Profile
+          <Button variant="secondary" size="sm" className="rounded-full" onClick={() => navigate(`/profile/${profile?.id}`)}>
+            <Trophy className="h-4 w-4 mr-2" /> Profile
           </Button>
-          <Button variant="ghost" size="sm" onClick={logOut}>
+          <Button variant="ghost" size="sm" className="rounded-full" onClick={logOut}>
             Logout
           </Button>
         </div>
       </header>
 
       {activeRoomQuery.data && (
-        <Card className="border-primary/40">
-          <CardHeader>
-            <CardTitle>Active Room</CardTitle>
-            <CardDescription>You already have an active room.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button className="w-full" onClick={() => navigate(`/rooms/${activeRoomQuery.data?.id}`)}>
-              Go to room
+        <Card className="border-primary/50 shadow-lg shadow-primary/10">
+          <CardHeader className="pb-3 text-center sm:text-left sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-primary flex items-center gap-2">
+                <Circle className="h-2 w-2 fill-primary animate-pulse" /> Active Room
+              </CardTitle>
+              <CardDescription className="mt-1">You already have an active match progressing.</CardDescription>
+            </div>
+            <Button className="w-full sm:w-auto mt-4 sm:mt-0 rounded-full" onClick={() => navigate(`/rooms/${activeRoomQuery.data?.id}`)}>
+              Return to match
             </Button>
-          </CardContent>
+          </CardHeader>
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Online Players</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {onlinePlayers.map((player) => (
-              <div key={player.id} className="flex items-center justify-between rounded-lg border border-border/60 px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium">{player.username}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {player.platform} • {player.division ?? 'Unranked'}
-                  </p>
-                </div>
-                <Badge variant="secondary" className="gap-1">
-                  <Circle className="h-3 w-3 fill-emerald-500 text-emerald-500" /> Online
-                </Badge>
+      <div className="grid gap-4 lg:grid-cols-12 content-start">
+        {/* MATCH REQUESTS (CENTER / MAIN FOCUS) */}
+        <div className="order-1 lg:order-2 lg:col-span-5 space-y-4">
+          <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Gamepad2 className="h-5 w-5 text-primary" /> Create Match
+              </CardTitle>
+              <CardDescription>Setup your preferences</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <select
+                  className="h-10 rounded-md border border-input bg-background/50 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                  value={roomPlatform}
+                  onChange={(e) => setRoomPlatform(e.target.value as Platform)}
+                >
+                  <option value="Mobile">Mobile</option>
+                  <option value="PlayStation">PlayStation</option>
+                  <option value="Xbox">Xbox</option>
+                  <option value="PC">PC</option>
+                </select>
+                <Input className="bg-background/50" value={roomDivision} onChange={(e) => setRoomDivision(e.target.value)} placeholder="Division (optional)" />
               </div>
-            ))}
-          </CardContent>
-        </Card>
+              <Button className="w-full gap-2 rounded-full font-semibold shadow-md active:scale-[0.98] transition-transform" size="lg" onClick={() => createRoomMutation.mutate()}>
+                <Plus className="h-5 w-5" /> Looking For Match
+              </Button>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Active Match Requests</CardTitle>
-            <CardDescription>One active room per player</CardDescription>
+          <Card className="border-border/60">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Open Rooms</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {roomsQuery.data?.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6">No open rooms right now. Create one!</p>
+                ) : (
+                  (roomsQuery.data ?? []).map((room) => (
+                    <div key={room.id} className="group relative overflow-hidden rounded-xl border border-border/50 bg-secondary/20 p-4 transition-colors hover:border-primary/40 hover:bg-secondary/40">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-semibold text-foreground">{room.host?.username ?? 'Host'}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {room.platform} <span className="opacity-50">|</span> {room.division || 'Unranked'}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="bg-background/50">waiting</Badge>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={room.host_id === session?.user.id ? "secondary" : "default"}
+                        className="mt-4 w-full rounded-full"
+                        disabled={room.host_id === session?.user.id}
+                        onClick={() => joinRoomMutation.mutate(room)}
+                      >
+                        {room.host_id === session?.user.id ? "You are host" : "Join Match"}
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* GLOBAL CHAT (LEFT/BOTTOM) */}
+        <Card className="order-3 lg:order-1 lg:col-span-4 flex flex-col h-[500px] lg:h-auto border-border/60">
+          <CardHeader className="pb-3 border-b border-border/40">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <MessageSquare className="h-5 w-5 text-primary" /> Global Chat
+            </CardTitle>
+            <CardDescription>Server-wide finding channel</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                className="h-10 rounded-md border border-input bg-transparent px-3 text-sm"
-                value={roomPlatform}
-                onChange={(e) => setRoomPlatform(e.target.value as Platform)}
-              >
-                <option value="Mobile">Mobile</option>
-                <option value="PlayStation">PlayStation</option>
-                <option value="Xbox">Xbox</option>
-                <option value="PC">PC</option>
-              </select>
-              <Input value={roomDivision} onChange={(e) => setRoomDivision(e.target.value)} placeholder="Division" />
-            </div>
-            <Button className="w-full gap-2" onClick={() => createRoomMutation.mutate()}>
-              <Plus className="h-4 w-4" /> Looking For Match
-            </Button>
-
-            <div className="space-y-2">
-              {(roomsQuery.data ?? []).map((room) => (
-                <div key={room.id} className="rounded-lg border border-border/60 p-3">
-                  <p className="text-sm font-medium">{room.host?.username ?? 'Host'}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {room.platform} • {room.division ?? 'Any division'}
-                  </p>
-                  <Button
-                    size="sm"
-                    className="mt-2 w-full"
-                    disabled={room.host_id === session?.user.id}
-                    onClick={() => joinRoomMutation.mutate(room)}
-                  >
-                    Join Match
-                  </Button>
+          <CardContent className="flex-1 overflow-y-auto p-4 space-y-3">
+            {(chatQuery.data ?? []).map((message) => {
+              const isMe = message.user_id === session?.user.id
+              return (
+                <div key={message.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`flex flex-col max-w-[85%] ${isMe ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[10px] text-muted-foreground mb-1 px-1">{message.profiles?.username}</span>
+                    <div className={`rounded-2xl px-3 py-2 text-sm ${isMe ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-secondary-foreground rounded-tl-sm'}`}>
+                      {message.message}
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
+              )
+            })}
+            <div ref={chatBottomRef} />
           </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Global Chat</CardTitle>
-            <CardDescription>300 chars max, profanity filtered</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="h-[320px] space-y-2 overflow-y-auto rounded-lg border border-border/50 p-2">
-              {(chatQuery.data ?? []).map((message) => (
-                <div key={message.id} className="rounded-md bg-secondary/60 p-2 text-sm">
-                  <p className="text-xs text-primary">{message.profiles?.username ?? 'Player'}</p>
-                  <p>{message.message}</p>
-                </div>
-              ))}
-              <div ref={chatBottomRef} />
-            </div>
-            <div className="flex gap-2">
+          <div className="p-3 border-t border-border/40 bg-card">
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessageMutation.mutate(chatText); }}>
               <Input
+                className="rounded-full bg-background/50 h-10"
                 maxLength={300}
                 value={chatText}
                 onChange={(e) => setChatText(e.target.value)}
-                placeholder="Ask for match..."
+                placeholder="Message lobby..."
               />
-              <Button disabled={!chatText.trim()} onClick={() => sendMessageMutation.mutate(chatText)}>
-                Send
+              <Button type="submit" size="icon" className="rounded-full shrink-0 h-10 w-10" disabled={!chatText.trim()}>
+                <Send className="h-4 w-4" />
               </Button>
+            </form>
+          </div>
+        </Card>
+
+        {/* ONLINE PLAYERS (RIGHT) */}
+        <Card className="order-2 lg:order-3 lg:col-span-3 border-border/60 max-h-[400px] flex flex-col">
+          <CardHeader className="pb-3 border-b border-border/40">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Users2 className="h-5 w-5 text-primary" /> Online ({onlinePlayers.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex-1 overflow-y-auto p-2">
+            <div className="space-y-1">
+              {onlinePlayers.length === 0 ? (
+                <p className="text-sm text-center text-muted-foreground my-4">No one else online</p>
+              ) : (
+                onlinePlayers.map((player) => (
+                  <div key={player.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-secondary/40 transition-colors">
+                    <div className="relative">
+                      <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center text-xs font-medium border border-border">
+                        {player.username.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border border-background bg-emerald-500"></span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{player.username}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {player.platform}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
