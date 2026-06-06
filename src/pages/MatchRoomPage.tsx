@@ -215,6 +215,11 @@ export const MatchRoomPage = () => {
           <CardTitle>Match Flow</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
+            {room.status === 'WAITING' && session?.user.id === room.host_id && (
+              <Button variant="destructive" onClick={() => updateStatus.mutate('CLOSED')}>
+                Cancel Room
+              </Button>
+            )}
           {room.status === 'MATCHED' && (
             <Button variant="secondary" onClick={() => updateStatus.mutate('PLAYING')}>
               Start Match

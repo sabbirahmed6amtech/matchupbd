@@ -27,6 +27,19 @@ For Google OAuth, add these redirect URLs in Supabase Auth settings:
 - `http://localhost:5173/lobby`
 - `https://your-production-domain/lobby`
 
+### Google OAuth setup
+
+1. Open Google Cloud Console and create or choose a project.
+2. Go to APIs & Services > Credentials and create an OAuth 2.0 Client ID.
+3. Choose Web application as the application type.
+4. Add this authorized redirect URI in Google Cloud:
+	- `https://zrmqdxaxhzqjbjwqjkym.supabase.co/auth/v1/callback`
+5. Copy the Google Client ID and Client Secret into Supabase Auth > Providers > Google.
+6. Turn on the Google provider in Supabase.
+7. Save the settings.
+
+If Supabase still shows `Unsupported provider: provider is not enabled`, the Google provider has not been switched on yet, or the client ID and secret have not been saved.
+
 ## Commands
 
 ```bash
