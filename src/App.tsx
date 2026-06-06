@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
@@ -14,7 +15,7 @@ const loadProfile = async (userId: string) => {
   return data
 }
 
-const Authenticated = ({ children }: { children: JSX.Element }) => {
+const Authenticated = ({ children }: { children: ReactElement }) => {
   const location = useLocation()
   const { loading, session, profile } = useAuthStore()
 

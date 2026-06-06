@@ -33,7 +33,7 @@ npm run build
 
 SQL schema and policies are in:
 
-- `/tmp/workspace/rafi6037/matchupbd/supabase/migrations/20260606143000_mvp_schema.sql`
+- `supabase/migrations/*.sql` (apply in timestamp order)
 
 Apply migration in your Supabase project before running the app.
 

@@ -76,13 +76,14 @@ create or replace function public.enforce_room_creation_cooldown()
 returns trigger
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare
   latest_room timestamptz;
 begin
   select created_at into latest_room
   from public.match_rooms
-  where host_id = new.host_id
+  where host_id = new.host_id and id is distinct from new.id
   order by created_at desc
   limit 1;
 
@@ -102,6 +103,7 @@ create or replace function public.refresh_user_reputation(target_user uuid)
 returns void
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare
   total_count int;
@@ -130,6 +132,7 @@ create or replace function public.close_room_if_fully_rated(input_room_id uuid)
 returns void
 language plpgsql
 security definer
+set search_path = public
 as $$
 declare
   host_user uuid;

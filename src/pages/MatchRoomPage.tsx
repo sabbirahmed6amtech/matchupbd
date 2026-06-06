@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import Filter from 'bad-words'
+import { useEffect, useRef, useState } from 'react'
+import { Filter } from 'bad-words'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import { MobileShell } from '@/components/layout/mobile-shell'
@@ -79,17 +79,9 @@ export const MatchRoomPage = () => {
   const room = roomQuery.data
   const ratings = ratingsQuery.data ?? []
 
-  const me = useMemo(() => {
-    if (!room || !session?.user.id) return null
-    if (room.host_id === session.user.id) return room.host
-    if (room.guest_id === session.user.id) return room.guest
-    return null
-  }, [room, session?.user.id])
+  const me = !room || !session?.user.id ? null : room.host_id === session.user.id ? room.host : room.guest_id === session.user.id ? room.guest : null
 
-  const opponent = useMemo(() => {
-    if (!room || !session?.user.id) return null
-    return room.host_id === session.user.id ? room.guest : room.host
-  }, [room, session?.user.id])
+  const opponent = !room || !session?.user.id ? null : room.host_id === session.user.id ? room.guest : room.host
 
   const sendMessage = useMutation({
     mutationFn: async (message: string) => {

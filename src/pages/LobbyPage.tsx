@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import Filter from 'bad-words'
+import { Filter } from 'bad-words'
 import { useNavigate } from 'react-router-dom'
 import { Circle, Plus } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
@@ -49,7 +49,6 @@ export const LobbyPage = () => {
   const [chatText, setChatText] = useState('')
   const [roomPlatform, setRoomPlatform] = useState<Platform>(profile?.platform ?? 'Mobile')
   const [roomDivision, setRoomDivision] = useState(profile?.division ?? '')
-  const [lastCreatedAt, setLastCreatedAt] = useState<number>(0)
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
   const onlineProfilesQuery = useQuery({ queryKey: ['online-profiles'], queryFn: fetchOnlineProfiles, refetchInterval: 15000 })
@@ -123,9 +122,19 @@ export const LobbyPage = () => {
     mutationFn: async () => {
       if (!session?.user.id) return
 
-      const elapsed = Date.now() - lastCreatedAt
-      if (elapsed < 30000) {
-        throw new Error(`Please wait ${Math.ceil((30000 - elapsed) / 1000)}s before creating another room.`)
+      const { data: latestMyRoom } = await supabase
+        .from('match_rooms')
+        .select('created_at')
+        .eq('host_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ created_at: string }>()
+
+      if (latestMyRoom?.created_at) {
+        const elapsed = Date.now() - new Date(latestMyRoom.created_at).getTime()
+        if (elapsed < 30000) {
+          throw new Error(`Please wait ${Math.ceil((30000 - elapsed) / 1000)}s before creating another room.`)
+        }
       }
 
       const { data: existingRoom } = await supabase
@@ -147,7 +156,6 @@ export const LobbyPage = () => {
         .single<MatchRoom>()
 
       if (error) throw error
-      setLastCreatedAt(Date.now())
       trackEvent('room_created', { platform: roomPlatform })
       navigate(`/rooms/${data.id}`)
     },
