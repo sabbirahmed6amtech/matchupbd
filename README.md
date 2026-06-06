@@ -1,16 +1,42 @@
-# React + Vite
+# eFootball Match BD (MVP)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Mobile-first matchmaking web app for eFootball players.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React + TypeScript + Vite
+- Tailwind CSS + shadcn/ui-style components
+- Zustand
+- TanStack Query
+- React Hook Form + Zod
+- Supabase Auth / Database / Realtime / Presence
 
-## React Compiler
+## Environment
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Create `.env` with:
 
-## Expanding the ESLint configuration
+```bash
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Commands
+
+```bash
+npm install
+npm run dev
+npm run lint
+npm run build
+```
+
+## Supabase
+
+SQL schema and policies are in:
+
+- `/tmp/workspace/rafi6037/matchupbd/supabase/migrations/20260606143000_mvp_schema.sql`
+
+Apply migration in your Supabase project before running the app.
+
+## MVP Flow
+
+Login → Complete profile → Enter lobby → Create/join room → Exchange IDs in room chat → End match → Rate opponent → Return to lobby.
