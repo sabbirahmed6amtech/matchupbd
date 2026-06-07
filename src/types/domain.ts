@@ -34,6 +34,7 @@ export type MatchRoom = {
   status: RoomStatus
   created_at: string
   closed_at: string | null
+  expires_at: string
   host?: Pick<Profile, 'id' | 'username' | 'platform' | 'division' | 'reputation_score'>
   guest?: Pick<Profile, 'id' | 'username' | 'platform' | 'division' | 'reputation_score'>
 }

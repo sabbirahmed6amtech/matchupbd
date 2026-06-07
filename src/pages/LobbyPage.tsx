@@ -31,13 +31,42 @@ const fetchOnlineProfiles = async () => {
 }
 
 const fetchRooms = async () => {
+  // Close any expired WAITING rooms server-side (fire-and-forget)
+  void supabase.rpc('close_expired_rooms')
+
   const { data } = await supabase
     .from('match_rooms')
     .select('*, host:profiles!match_rooms_host_id_fkey(id,username,platform,division,reputation_score)')
     .eq('status', 'WAITING')
+    .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
 
   return (data ?? []) as MatchRoom[]
+}
+
+// Returns the active room that blocks the user from creating/joining another,
+// but treats a RATING room as non-blocking once the user has already rated.
+const getBlockingActiveRoom = async (userId: string): Promise<MatchRoom | null> => {
+  const { data } = await supabase
+    .from('match_rooms')
+    .select('*')
+    .or(`host_id.eq.${userId},guest_id.eq.${userId}`)
+    .in('status', ACTIVE_STATUSES)
+    .order('created_at', { ascending: false })
+    .maybeSingle<MatchRoom>()
+
+  if (!data) return null
+  if (data.status !== 'RATING') return data
+
+  // Rating room: only block if user hasn't submitted their rating yet
+  const { data: myRating } = await supabase
+    .from('ratings')
+    .select('id')
+    .eq('room_id', data.id)
+    .eq('from_user_id', userId)
+    .maybeSingle()
+
+  return myRating ? null : data
 }
 
 export const LobbyPage = () => {
@@ -112,17 +141,7 @@ export const LobbyPage = () => {
 
   const activeRoomQuery = useQuery({
     queryKey: ['my-active-room', session?.user.id],
-    queryFn: async () => {
-      if (!session?.user.id) return null
-      const { data } = await supabase
-        .from('match_rooms')
-        .select('*')
-        .or(`host_id.eq.${session.user.id},guest_id.eq.${session.user.id}`)
-        .in('status', ACTIVE_STATUSES)
-        .order('created_at', { ascending: false })
-        .maybeSingle<MatchRoom>()
-      return data
-    },
+    queryFn: () => session?.user.id ? getBlockingActiveRoom(session.user.id) : null,
     enabled: Boolean(session?.user.id),
     refetchInterval: 4000,
   })
@@ -190,13 +209,7 @@ export const LobbyPage = () => {
         }
       }
 
-      const { data: existingRoom } = await supabase
-        .from('match_rooms')
-        .select('*')
-        .or(`host_id.eq.${session.user.id},guest_id.eq.${session.user.id}`)
-        .in('status', ACTIVE_STATUSES)
-        .maybeSingle<MatchRoom>()
-
+      const existingRoom = await getBlockingActiveRoom(session.user.id)
       if (existingRoom) {
         navigate(`/rooms/${existingRoom.id}`)
         return
@@ -221,13 +234,7 @@ export const LobbyPage = () => {
     mutationFn: async (room: MatchRoom) => {
       if (!session?.user.id || room.host_id === session.user.id) return
 
-      const { data: existingRoom } = await supabase
-        .from('match_rooms')
-        .select('id')
-        .or(`host_id.eq.${session.user.id},guest_id.eq.${session.user.id}`)
-        .in('status', ACTIVE_STATUSES)
-        .maybeSingle<{ id: string }>()
-
+      const existingRoom = await getBlockingActiveRoom(session.user.id)
       if (existingRoom) {
         navigate(`/rooms/${existingRoom.id}`)
         return
