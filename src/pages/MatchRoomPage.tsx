@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Filter } from 'bad-words'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Swords, Flag, MessageCircle, Send, Star, Clock } from 'lucide-react'
+import { ArrowLeft, Swords, Flag, MessageCircle, Send, Star, Clock, Loader2, Crown, Shield } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { supabase } from '@/lib/supabase'
@@ -14,6 +14,14 @@ import type { MatchRoom, Rating, RatingValue, RoomMessage } from '@/types/domain
 import { trackEvent } from '@/lib/analytics'
 
 const messageFilter = new Filter()
+
+const STATUS_COLORS: Record<string, string> = {
+  WAITING: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30',
+  MATCHED: 'bg-blue-500/10 text-blue-600 border-blue-500/30',
+  PLAYING: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30',
+  RATING: 'bg-purple-500/10 text-purple-600 border-purple-500/30',
+  CLOSED: 'bg-secondary text-muted-foreground border-border',
+}
 
 const fetchRoom = async (roomId: string) => {
   const { data } = await supabase
@@ -80,9 +88,9 @@ export const MatchRoomPage = () => {
   const room = roomQuery.data
   const ratings = ratingsQuery.data ?? []
 
-  const me = !room || !session?.user.id ? null : room.host_id === session.user.id ? room.host : room.guest_id === session.user.id ? room.guest : null
-
-  const opponent = !room || !session?.user.id ? null : room.host_id === session.user.id ? room.guest : room.host
+  const isHost = room?.host_id === session?.user.id
+  const me = !room || !session?.user.id ? null : isHost ? room.host : room.guest_id === session.user.id ? room.guest : null
+  const opponent = !room || !session?.user.id ? null : isHost ? room.guest : room.host
 
   const sendMessage = useMutation({
     mutationFn: async (message: string) => {
@@ -142,134 +150,222 @@ export const MatchRoomPage = () => {
     void closeRoom()
   }, [bothRated, queryClient, room, roomId])
 
-  if (!room) {
-    return <MobileShell>Loading room...</MobileShell>
+  if (roomQuery.isLoading) {
+    return (
+      <MobileShell>
+        <div className="flex flex-col items-center justify-center flex-1 py-20 gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Loading room...</p>
+        </div>
+      </MobileShell>
+    )
   }
+
+  if (!room) {
+    return (
+      <MobileShell>
+        <div className="flex flex-col items-center justify-center flex-1 py-20 gap-3">
+          <p className="text-muted-foreground">Room not found.</p>
+          <Button size="sm" onClick={() => navigate('/lobby')}>Back to Lobby</Button>
+        </div>
+      </MobileShell>
+    )
+  }
+
+  const statusColorClass = STATUS_COLORS[room.status] ?? STATUS_COLORS.CLOSED
 
   return (
     <MobileShell>
-      <header className="flex items-center justify-between mb-2">
-        <Button variant="ghost" size="sm" className="rounded-full gap-2 -ml-3" onClick={() => navigate('/lobby')}>
+      {/* Header */}
+      <header className="flex items-center justify-between mb-1">
+        <Button variant="ghost" size="sm" className="rounded-full gap-2 -ml-3 h-8" onClick={() => navigate('/lobby')}>
           <ArrowLeft className="h-4 w-4" /> Lobby
         </Button>
-        <Badge variant={room.status === 'WAITING' ? "outline" : room.status === 'PLAYING' ? "default" : "secondary"} className="uppercase tracking-widest text-[10px]">
+        <Badge variant="outline" className={`uppercase tracking-widest text-[10px] font-semibold px-2.5 ${statusColorClass}`}>
           {room.status}
         </Badge>
       </header>
 
       <div className="grid gap-4 lg:grid-cols-12">
-        {/* MATCH DETAILS & PLAYERS (LEFT ON DESKTOP) */}
+        {/* MATCH DETAILS LEFT */}
         <div className="lg:col-span-7 flex flex-col gap-4">
-          <Card className="border-border/60 shadow-lg relative overflow-hidden bg-card/60 backdrop-blur-sm">
+          <Card className="border-border/60 shadow-md relative overflow-hidden bg-card/60 backdrop-blur-sm">
             <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent pointer-events-none" />
-            <CardHeader className="text-center pb-2">
-              <CardTitle className="text-2xl font-bold flex items-center justify-center gap-2">
-                <Swords className="h-6 w-6 text-primary" /> Match Room
+
+            <CardHeader className="text-center pb-2 pt-5">
+              <CardTitle className="text-xl font-bold flex items-center justify-center gap-2">
+                <Swords className="h-5 w-5 text-primary" /> Match Room
               </CardTitle>
-              <CardDescription>Exchange IDs in chat to start the game.</CardDescription>
+              <p className="text-xs text-muted-foreground mt-1">Share your eFootball ID in chat to start the game.</p>
             </CardHeader>
-            <CardContent className="pt-4">
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8">
-                {/* Player 1 (Me) */}
-                <div className="flex flex-col items-center p-4 rounded-xl bg-secondary/30 w-full sm:w-1/2 border border-border/40">
-                  <div className="h-16 w-16 rounded-full bg-secondary flex items-center justify-center text-2xl font-bold border-2 border-primary/50 text-foreground mb-3">
+
+            <CardContent className="pt-3 pb-2">
+              {/* Players */}
+              <div className="flex items-stretch gap-3 sm:gap-6">
+                {/* Me */}
+                <div className="flex-1 flex flex-col items-center p-3 sm:p-4 rounded-xl bg-primary/5 border border-primary/20">
+                  <div className="flex items-center gap-1 mb-2">
+                    <Crown className="h-3 w-3 text-primary" />
+                    <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">
+                      {isHost ? 'You (Host)' : 'You'}
+                    </span>
+                  </div>
+                  <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary/10 flex items-center justify-center text-xl sm:text-2xl font-bold border-2 border-primary/40 text-primary mb-2">
                     {me?.username?.charAt(0).toUpperCase() ?? '?'}
                   </div>
-                  <p className="font-bold text-lg truncate w-full text-center">{me?.username ?? '—'}</p>
-                  <Badge variant="outline" className="mt-1 mb-2 bg-background/50 text-xs text-muted-foreground border-border">
+                  <p className="font-bold text-sm sm:text-base truncate w-full text-center">{me?.username ?? '—'}</p>
+                  <Badge variant="outline" className="mt-1.5 text-[10px] px-2 border-border/60 bg-background/50">
                     {me?.platform ?? '—'}
                   </Badge>
-                  <p className="text-xs text-muted-foreground">Div: {me?.division ?? 'Unranked'}</p>
-                  <div className="flex items-center gap-1 mt-2 text-xs">
-                    <Star className="h-3 w-3 text-amber-500 fill-amber-500" /> 
+                  <p className="text-[10px] text-muted-foreground mt-1">Div: {me?.division ?? 'Unranked'}</p>
+                  <div className="flex items-center gap-1 mt-1.5 text-[10px] text-muted-foreground">
+                    <Star className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
                     {me?.reputation_score !== undefined ? (me.reputation_score * 100).toFixed(0) + '%' : '—'}
                   </div>
                 </div>
 
-                <div className="text-sm font-bold text-muted-foreground/50 italic bg-background/80 px-3 py-1 rounded-md border border-border/40 shadow-sm">
-                  VS
+                {/* VS divider */}
+                <div className="flex flex-col items-center justify-center shrink-0">
+                  <div className="text-xs font-black text-muted-foreground/40 bg-background/60 border border-border/30 px-2 py-1 rounded-md">VS</div>
                 </div>
 
-                {/* Player 2 (Opponent) */}
-                <div className={`flex flex-col items-center p-4 rounded-xl border border-border/40 w-full sm:w-1/2 transition-colors ${opponent ? 'bg-secondary/30' : 'bg-background/20 border-dashed animate-pulse'}`}>
+                {/* Opponent */}
+                <div className={`flex-1 flex flex-col items-center p-3 sm:p-4 rounded-xl border transition-all ${opponent ? 'bg-secondary/20 border-border/40' : 'bg-background/10 border-dashed border-muted-foreground/20'}`}>
                   {opponent ? (
                     <>
-                      <div className="h-16 w-16 rounded-full bg-secondary flex items-center justify-center text-2xl font-bold border-2 border-border text-foreground mb-3">
+                      <div className="flex items-center gap-1 mb-2">
+                        <Shield className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          {isHost ? 'Opponent' : 'Host'}
+                        </span>
+                      </div>
+                      <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-secondary flex items-center justify-center text-xl sm:text-2xl font-bold border-2 border-border text-foreground mb-2">
                         {opponent.username?.charAt(0).toUpperCase() ?? '?'}
                       </div>
-                      <p className="font-bold text-lg truncate w-full text-center">{opponent.username}</p>
-                      <Badge variant="outline" className="mt-1 mb-2 bg-background/50 text-xs text-muted-foreground border-border">
+                      <p className="font-bold text-sm sm:text-base truncate w-full text-center">{opponent.username}</p>
+                      <Badge variant="outline" className="mt-1.5 text-[10px] px-2 border-border/60 bg-background/50">
                         {opponent.platform}
                       </Badge>
-                      <p className="text-xs text-muted-foreground">Div: {opponent.division ?? 'Unranked'}</p>
-                      <div className="flex items-center gap-1 mt-2 text-xs">
-                        <Star className="h-3 w-3 text-amber-500 fill-amber-500" /> 
+                      <p className="text-[10px] text-muted-foreground mt-1">Div: {opponent.division ?? 'Unranked'}</p>
+                      <div className="flex items-center gap-1 mt-1.5 text-[10px] text-muted-foreground">
+                        <Star className="h-2.5 w-2.5 text-amber-500 fill-amber-500" />
                         {opponent.reputation_score !== undefined ? (opponent.reputation_score * 100).toFixed(0) + '%' : '—'}
                       </div>
                     </>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full min-h-[140px] text-muted-foreground">
-                      <div className="h-12 w-12 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center mb-3">
-                        <span className="text-xl">?</span>
+                    <div className="flex flex-col items-center justify-center h-full min-h-[140px] gap-3 text-muted-foreground">
+                      <div className="h-12 w-12 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center animate-pulse">
+                        <span className="text-lg">?</span>
                       </div>
-                      <p className="text-sm">Waiting for opponent...</p>
+                      <p className="text-xs text-center">Waiting for<br/>opponent...</p>
                     </div>
                   )}
                 </div>
               </div>
             </CardContent>
-            <CardFooter className="flex flex-col gap-2 pt-0 bg-transparent border-t border-border/30 mt-4 px-6 py-4">
-              {room.status === 'WAITING' && session?.user.id === room.host_id && (
-                <Button variant="destructive" className="w-full sm:w-auto rounded-full font-medium" onClick={() => updateStatus.mutate('CLOSED')}>
+
+            <CardFooter className="flex flex-col gap-2 border-t border-border/30 mt-2 px-4 sm:px-6 py-4">
+              {room.status === 'WAITING' && isHost && (
+                <Button
+                  variant="destructive"
+                  className="w-full rounded-full font-medium h-10"
+                  disabled={updateStatus.isPending}
+                  onClick={() => updateStatus.mutate('CLOSED')}
+                >
+                  {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Cancel Room
                 </Button>
               )}
+
+              {room.status === 'WAITING' && !isHost && (
+                <p className="text-xs text-center text-muted-foreground py-2">
+                  <Clock className="h-3 w-3 inline mr-1" />
+                  Waiting for the host to find an opponent...
+                </p>
+              )}
+
               {room.status === 'MATCHED' && (
-                <Button className="w-full text-lg h-12 shadow-lg hover:shadow-primary/20 hover:-translate-y-0.5 transition-all rounded-full bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => updateStatus.mutate('PLAYING')}>
-                  Start Match
-                </Button>
+                <div className="w-full space-y-2">
+                  <Button
+                    className="w-full h-11 text-base shadow-md rounded-full"
+                    disabled={updateStatus.isPending}
+                    onClick={() => updateStatus.mutate('PLAYING')}
+                  >
+                    {updateStatus.isPending ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Starting...</> : 'Start Match'}
+                  </Button>
+                  <p className="text-[10px] text-center text-muted-foreground">Both players can click — confirm when you're ready.</p>
+                </div>
               )}
+
               {room.status === 'PLAYING' && (
-                <Button variant="destructive" className="w-full text-lg h-12 gap-2 shadow-lg shadow-destructive/20 rounded-full" onClick={() => updateStatus.mutate('RATING')}>
-                  <Flag className="h-5 w-5" /> End Match & Rate
+                <Button
+                  variant="destructive"
+                  className="w-full h-11 text-base gap-2 rounded-full shadow-md"
+                  disabled={updateStatus.isPending}
+                  onClick={() => updateStatus.mutate('RATING')}
+                >
+                  {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flag className="h-5 w-5" />}
+                  End Match & Rate
                 </Button>
               )}
+
               {room.status === 'RATING' && (
-                <div className="w-full text-center space-y-4">
-                  <p className="text-sm font-medium">How was the opponent?</p>
+                <div className="w-full space-y-3">
+                  <p className="text-sm font-semibold text-center">Rate your opponent</p>
                   <div className="grid grid-cols-3 gap-2">
-                    <Button variant={myRating?.rating === 'GOOD' ? 'default' : 'secondary'} className={`rounded-xl ${myRating?.rating === 'GOOD' ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md' : ''}`} onClick={() => submitRating.mutate('GOOD')}>
-                      GOOD
+                    <Button
+                      variant={myRating?.rating === 'GOOD' ? 'default' : 'secondary'}
+                      className={`rounded-xl h-10 text-sm font-medium ${myRating?.rating === 'GOOD' ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : ''}`}
+                      disabled={submitRating.isPending}
+                      onClick={() => submitRating.mutate('GOOD')}
+                    >
+                      👍 Good
                     </Button>
-                    <Button variant={myRating?.rating === 'NEUTRAL' ? 'default' : 'secondary'} className={`rounded-xl ${myRating?.rating === 'NEUTRAL' ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md' : ''}`} onClick={() => submitRating.mutate('NEUTRAL')}>
-                      NEUTRAL
+                    <Button
+                      variant={myRating?.rating === 'NEUTRAL' ? 'default' : 'secondary'}
+                      className={`rounded-xl h-10 text-sm font-medium ${myRating?.rating === 'NEUTRAL' ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : ''}`}
+                      disabled={submitRating.isPending}
+                      onClick={() => submitRating.mutate('NEUTRAL')}
+                    >
+                      😐 OK
                     </Button>
-                    <Button variant={myRating?.rating === 'BAD' ? 'destructive' : 'secondary'} className={`rounded-xl ${myRating?.rating === 'BAD' ? 'shadow-md' : ''}`} onClick={() => submitRating.mutate('BAD')}>
-                      BAD
+                    <Button
+                      variant={myRating?.rating === 'BAD' ? 'destructive' : 'secondary'}
+                      className="rounded-xl h-10 text-sm font-medium"
+                      disabled={submitRating.isPending}
+                      onClick={() => submitRating.mutate('BAD')}
+                    >
+                      👎 Bad
                     </Button>
                   </div>
-                  <p className="w-full text-xs text-muted-foreground flex items-center justify-center gap-1">
-                    {bothRated ? 'Closing room...' : <><Clock className="h-3 w-3" /> Waiting for both players to rate.</>}
-                  </p>
+                  <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                    {bothRated ? (
+                      <><Loader2 className="h-3 w-3 animate-spin" /> Closing room...</>
+                    ) : myRating ? (
+                      <><Clock className="h-3 w-3" /> Waiting for opponent to rate.</>
+                    ) : (
+                      <><Clock className="h-3 w-3" /> Please rate to close the room.</>
+                    )}
+                  </div>
                 </div>
               )}
             </CardFooter>
           </Card>
         </div>
 
-        {/* CHAT (RIGHT ON DESKTOP) */}
-        <div className="lg:col-span-5 h-[500px] lg:h-[calc(100vh-8rem)] min-h-[400px]">
+        {/* PRIVATE CHAT RIGHT */}
+        <div className="lg:col-span-5 h-[420px] lg:h-[calc(100vh-7rem)] min-h-[350px]">
           <Card className="h-full flex flex-col border-border/60 shadow-md">
-            <CardHeader className="pb-3 border-b border-border/40 py-4 shrink-0">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <MessageCircle className="h-5 w-5 text-primary" /> Private Chat
+            <CardHeader className="py-3 px-4 border-b border-border/40 shrink-0">
+              <CardTitle className="text-base flex items-center gap-2">
+                <MessageCircle className="h-4 w-4 text-primary" /> Private Chat
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto p-4 space-y-3 bg-background/30 max-h-[100%]">
+            <CardContent className="flex-1 overflow-y-auto p-3 space-y-2 bg-background/20 min-h-0">
               {(roomMessagesQuery.data ?? []).length === 0 ? (
-                <div className="h-full flex flex-col justify-center items-center text-muted-foreground opacity-60">
-                  <MessageCircle className="h-8 w-8 mb-2" />
-                  <p className="text-xs">No messages yet.</p>
+                <div className="h-full flex flex-col justify-center items-center text-muted-foreground opacity-60 gap-2">
+                  <MessageCircle className="h-8 w-8" />
+                  <p className="text-xs text-center">No messages yet.<br/>Share your eFootball ID to start!</p>
                 </div>
               ) : (
                 (roomMessagesQuery.data ?? []).map((message) => {
@@ -277,8 +373,8 @@ export const MatchRoomPage = () => {
                   return (
                     <div key={message.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
                       <div className={`flex flex-col max-w-[85%] ${isMe ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[10px] text-muted-foreground mb-1 px-1">{message.profiles?.username}</span>
-                        <div className={`rounded-2xl px-3 py-2 text-sm shadow-sm ${isMe ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-secondary-foreground rounded-tl-sm border border-border/50'}`}>
+                        <span className="text-[10px] text-muted-foreground mb-0.5 px-1">{message.profiles?.username}</span>
+                        <div className={`rounded-2xl px-3 py-1.5 text-sm shadow-sm ${isMe ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-secondary-foreground rounded-tl-sm border border-border/40'}`}>
                           {message.message}
                         </div>
                       </div>
@@ -289,16 +385,16 @@ export const MatchRoomPage = () => {
               <div ref={chatBottomRef} />
             </CardContent>
             <div className="p-3 border-t border-border/40 bg-card shrink-0">
-              <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessage.mutate(chatText); }}>
+              <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessage.mutate(chatText) }}>
                 <Input
-                  className="rounded-full bg-background/50 h-10"
+                  className="rounded-full bg-background/50 h-9 text-sm"
                   maxLength={300}
                   value={chatText}
                   onChange={(e) => setChatText(e.target.value)}
-                  placeholder="Share details here..."
+                  placeholder="Share eFootball ID or chat..."
                 />
-                <Button type="submit" size="icon" className="rounded-full h-10 w-10 shrink-0" disabled={!chatText.trim()}>
-                  <Send className="h-4 w-4" />
+                <Button type="submit" size="icon" className="rounded-full h-9 w-9 shrink-0" disabled={!chatText.trim() || sendMessage.isPending}>
+                  {sendMessage.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                 </Button>
               </form>
             </div>
