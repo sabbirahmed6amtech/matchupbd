@@ -41,12 +41,38 @@ const fetchRatings = async (roomId: string) => {
   return (data ?? []) as Rating[]
 }
 
+const playMatchSound = () => {
+  try {
+    const ctx = new AudioContext()
+    // Ascending triumphant arpeggio: C5 → E5 → G5 → C6
+    const notes = [523.25, 659.25, 783.99, 1046.5]
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const t = ctx.currentTime + i * 0.13
+      gain.gain.setValueAtTime(0, t)
+      gain.gain.linearRampToValueAtTime(0.28, t + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55)
+      osc.start(t)
+      osc.stop(t + 0.56)
+    })
+  } catch {
+    // silently ignore if AudioContext is unavailable
+  }
+}
+
 export const MatchRoomPage = () => {
   const { roomId = '' } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { session } = useAuthStore()
   const [chatText, setChatText] = useState('')
+  const [showMatchedOverlay, setShowMatchedOverlay] = useState(false)
+  const prevStatusRef = useRef<string | undefined>(undefined)
 
   // Chat pagination state
   const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([])
@@ -190,6 +216,22 @@ export const MatchRoomPage = () => {
     if (room?.status === 'CLOSED') navigate('/lobby')
   }, [navigate, room?.status])
 
+  useEffect(() => {
+    if (!room?.status) return
+    const prev = prevStatusRef.current
+    prevStatusRef.current = room.status
+    if (prev === 'WAITING' && room.status === 'MATCHED') {
+      playMatchSound()
+      document.title = '⚔️ Opponent Found! — MatchUp BD'
+      setShowMatchedOverlay(true)
+      const t = setTimeout(() => {
+        setShowMatchedOverlay(false)
+        document.title = 'MatchUp BD'
+      }, 2800)
+      return () => clearTimeout(t)
+    }
+  }, [room?.status])
+
   if (roomQuery.isLoading) {
     return (
       <MobileShell>
@@ -216,6 +258,27 @@ export const MatchRoomPage = () => {
 
   return (
     <MobileShell>
+      {showMatchedOverlay && (
+        <div className="matched-backdrop fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse at center, rgba(109,40,217,0.55) 0%, rgba(0,0,0,0.82) 70%)' }}>
+          <div className="matched-text flex flex-col items-center gap-5 select-none">
+            <div className="relative flex items-center justify-center">
+              <div className="matched-ring absolute h-32 w-32 rounded-full border-4 border-primary/60" />
+              <div className="matched-ring absolute h-32 w-32 rounded-full border-4 border-primary/40" style={{ animationDelay: '0.4s' }} />
+              <Swords className="h-16 w-16 text-primary drop-shadow-[0_0_18px_hsl(270,95%,65%)]" />
+            </div>
+            <div className="text-center">
+              <p className="text-4xl font-black tracking-widest text-white drop-shadow-[0_0_24px_hsl(270,95%,65%)] uppercase">
+                Opponent
+              </p>
+              <p className="text-5xl font-black tracking-widest text-primary drop-shadow-[0_0_32px_hsl(270,95%,65%)] uppercase mt-1">
+                Found!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="flex items-center justify-between mb-1">
         <Button variant="ghost" size="sm" className="rounded-full gap-2 -ml-3 h-8" onClick={() => navigate('/lobby')}>
           <ArrowLeft className="h-4 w-4" /> Lobby
