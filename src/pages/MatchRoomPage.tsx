@@ -72,6 +72,7 @@ export const MatchRoomPage = () => {
   const { session } = useAuthStore()
   const [chatText, setChatText] = useState('')
   const [showMatchedOverlay, setShowMatchedOverlay] = useState(false)
+  const [secsLeft, setSecsLeft] = useState<number | null>(null)
   const prevStatusRef = useRef<string | undefined>(undefined)
 
   // Chat pagination state
@@ -208,6 +209,7 @@ export const MatchRoomPage = () => {
       await supabase.rpc('close_room_if_fully_rated', { input_room_id: roomId })
       trackEvent('rating_submitted', { value })
     },
+    onSuccess: () => navigate('/lobby'),
   })
 
   const myRating = ratings.find((rating) => rating.from_user_id === session?.user.id)
@@ -231,6 +233,25 @@ export const MatchRoomPage = () => {
       return () => clearTimeout(t)
     }
   }, [room?.status])
+
+  // Countdown timer for WAITING rooms
+  const expiresAt = room?.expires_at
+  const isWaiting = room?.status === 'WAITING'
+  useEffect(() => {
+    if (!expiresAt || !isWaiting) { setSecsLeft(null); return }
+    const tick = () => Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+    setSecsLeft(tick())
+    const id = setInterval(() => { const s = tick(); setSecsLeft(s); if (s === 0) clearInterval(id) }, 1000)
+    return () => clearInterval(id)
+  }, [expiresAt, isWaiting])
+
+  // Auto-close expired WAITING room (host only)
+  useEffect(() => {
+    if (secsLeft === 0 && isWaiting && isHost && !updateStatus.isPending) {
+      updateStatus.mutate('CLOSED')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secsLeft])
 
   if (roomQuery.isLoading) {
     return (
@@ -366,22 +387,37 @@ export const MatchRoomPage = () => {
 
             <CardFooter className="flex flex-col gap-2 border-t border-border/30 mt-2 px-4 sm:px-6 py-4">
               {room.status === 'WAITING' && isHost && (
-                <Button
-                  variant="destructive"
-                  className="w-full rounded-full font-medium h-10"
-                  disabled={updateStatus.isPending}
-                  onClick={() => updateStatus.mutate('CLOSED')}
-                >
-                  {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                  Cancel Room
-                </Button>
+                <>
+                  <Button
+                    variant="destructive"
+                    className="w-full rounded-full font-medium h-10"
+                    disabled={updateStatus.isPending}
+                    onClick={() => updateStatus.mutate('CLOSED')}
+                  >
+                    {updateStatus.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Cancel Room
+                  </Button>
+                  {secsLeft !== null && (
+                    <p className={`text-xs text-center ${secsLeft < 60 ? 'text-red-400' : 'text-muted-foreground'}`}>
+                      <Clock className="h-3 w-3 inline mr-1" />
+                      Auto-closes in {Math.floor(secsLeft / 60)}:{String(secsLeft % 60).padStart(2, '0')}
+                    </p>
+                  )}
+                </>
               )}
 
               {room.status === 'WAITING' && !isHost && (
-                <p className="text-xs text-center text-muted-foreground py-2">
-                  <Clock className="h-3 w-3 inline mr-1" />
-                  Waiting for the host to find an opponent...
-                </p>
+                <div className="text-center py-2 space-y-1">
+                  <p className="text-xs text-muted-foreground">
+                    <Clock className="h-3 w-3 inline mr-1" />
+                    Waiting for the host to find an opponent...
+                  </p>
+                  {secsLeft !== null && (
+                    <p className={`text-xs ${secsLeft < 60 ? 'text-red-400' : 'text-muted-foreground/60'}`}>
+                      Room expires in {Math.floor(secsLeft / 60)}:{String(secsLeft % 60).padStart(2, '0')}
+                    </p>
+                  )}
+                </div>
               )}
 
               {room.status === 'MATCHED' && (
