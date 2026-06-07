@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { AvatarDisplay } from '@/components/ui/avatar-display'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { supabase } from '@/lib/supabase'
 import type { MatchRoom, Rating, RatingValue, RoomMessage } from '@/types/domain'
@@ -28,7 +29,7 @@ const fetchRoom = async (roomId: string) => {
   const { data } = await supabase
     .from('match_rooms')
     .select(
-      '*, host:profiles!match_rooms_host_id_fkey(id,username,platform,division,reputation_score,matches_played), guest:profiles!match_rooms_guest_id_fkey(id,username,platform,division,reputation_score,matches_played)',
+      '*, host:profiles!match_rooms_host_id_fkey(id,username,platform,division,reputation_score,matches_played,avatar_preset,avatar_bg), guest:profiles!match_rooms_guest_id_fkey(id,username,platform,division,reputation_score,matches_played,avatar_preset,avatar_bg)',
     )
     .eq('id', roomId)
     .single()
@@ -332,9 +333,10 @@ export const MatchRoomPage = () => {
                       {isHost ? 'You (Host)' : 'You'}
                     </span>
                   </div>
-                  <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary/10 flex items-center justify-center text-xl sm:text-2xl font-bold border-2 border-primary/40 text-primary mb-2">
-                    {me?.username?.charAt(0).toUpperCase() ?? '?'}
-                  </div>
+                  {me
+                    ? <AvatarDisplay profile={me} size="lg" className="border-2 border-primary/40 mb-2" />
+                    : <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary/10 flex items-center justify-center text-xl font-bold border-2 border-primary/40 text-primary mb-2">?</div>
+                  }
                   <p className="font-bold text-sm sm:text-base truncate w-full text-center">{me?.username ?? '—'}</p>
                   <Badge variant="outline" className="mt-1.5 text-[10px] px-2 border-border/60 bg-background/50">
                     {me?.platform ?? '—'}
@@ -360,9 +362,7 @@ export const MatchRoomPage = () => {
                           {isHost ? 'Opponent' : 'Host'}
                         </span>
                       </div>
-                      <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-secondary flex items-center justify-center text-xl sm:text-2xl font-bold border-2 border-border text-foreground mb-2">
-                        {opponent.username?.charAt(0).toUpperCase() ?? '?'}
-                      </div>
+                      <AvatarDisplay profile={opponent} size="lg" className="border-2 border-border mb-2" />
                       <p className="font-bold text-sm sm:text-base truncate w-full text-center">{opponent.username}</p>
                       <Badge variant="outline" className="mt-1.5 text-[10px] px-2 border-border/60 bg-background/50">
                         {opponent.platform}

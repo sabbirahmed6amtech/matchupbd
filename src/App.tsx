@@ -9,6 +9,7 @@ import { ProfileSetupPage } from '@/pages/ProfileSetupPage'
 import { LobbyPage } from '@/pages/LobbyPage'
 import { MatchRoomPage } from '@/pages/MatchRoomPage'
 import { ProfilePage } from '@/pages/ProfilePage'
+import { ProfileEditPage } from '@/pages/ProfileEditPage'
 
 const loadProfile = async (userId: string) => {
   const { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle<Profile>()
@@ -106,6 +107,14 @@ function App() {
         element={
           <Authenticated>
             <ProfilePage />
+          </Authenticated>
+        }
+      />
+      <Route
+        path="/profile-edit"
+        element={
+          <Authenticated>
+            <ProfileEditPage />
           </Authenticated>
         }
       />

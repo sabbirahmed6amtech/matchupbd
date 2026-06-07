@@ -5,6 +5,8 @@ import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { AvatarDisplay } from '@/components/ui/avatar-display'
+import { getAvatarBgGradient } from '@/lib/avatar'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '@/types/domain'
 
@@ -64,12 +66,18 @@ export const ProfilePage = () => {
 
       {/* Hero card */}
       <Card className="border-border/60 bg-card/60 backdrop-blur-sm overflow-hidden">
-        <div className="h-20 sm:h-28 bg-gradient-to-br from-primary/20 via-primary/10 to-transparent" />
+        <div
+          className="h-20 sm:h-28"
+          style={{ background: getAvatarBgGradient(profile.avatar_bg), opacity: 0.85 }}
+        />
         <CardContent className="px-5 pb-5 -mt-10 sm:-mt-12">
           <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-            <div className="h-20 w-20 sm:h-24 sm:w-24 rounded-2xl bg-card border-4 border-card shadow-lg flex items-center justify-center text-3xl sm:text-4xl font-black text-primary shrink-0">
-              {profile.username.charAt(0).toUpperCase()}
-            </div>
+            <AvatarDisplay
+              profile={profile}
+              size="xl"
+              shape="rounded"
+              className="border-4 border-card shadow-lg"
+            />
             <div className="flex-1 pb-1">
               <h1 className="text-xl sm:text-2xl font-bold leading-tight">{profile.username}</h1>
               <div className="flex flex-wrap gap-1.5 mt-2">

@@ -6,6 +6,8 @@ export type Profile = {
   id: string
   username: string
   avatar_url: string | null
+  avatar_preset: string | null
+  avatar_bg: string | null
   country: string
   platform: Platform
   efootball_id: string | null
@@ -35,8 +37,8 @@ export type MatchRoom = {
   created_at: string
   closed_at: string | null
   expires_at: string
-  host?: Pick<Profile, 'id' | 'username' | 'platform' | 'division' | 'reputation_score'>
-  guest?: Pick<Profile, 'id' | 'username' | 'platform' | 'division' | 'reputation_score'>
+  host?: Pick<Profile, 'id' | 'username' | 'platform' | 'division' | 'reputation_score' | 'avatar_preset' | 'avatar_bg'>
+  guest?: Pick<Profile, 'id' | 'username' | 'platform' | 'division' | 'reputation_score' | 'avatar_preset' | 'avatar_bg'>
 }
 
 export type RoomMessage = {

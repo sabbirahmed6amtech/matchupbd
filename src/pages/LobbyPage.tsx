@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Filter } from 'bad-words'
 import { useNavigate } from 'react-router-dom'
-import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2, Loader2, Star, LogOut, ChevronUp } from 'lucide-react'
+import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2, Loader2, Star, LogOut, ChevronUp, Pencil } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { AvatarDisplay } from '@/components/ui/avatar-display'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/useAuthStore'
 import type { ChatMessage, MatchRoom, Platform, Profile, RoomStatus } from '@/types/domain'
@@ -36,7 +37,7 @@ const fetchRooms = async () => {
 
   const { data } = await supabase
     .from('match_rooms')
-    .select('*, host:profiles!match_rooms_host_id_fkey(id,username,platform,division,reputation_score)')
+    .select('*, host:profiles!match_rooms_host_id_fkey(id,username,platform,division,reputation_score,avatar_preset,avatar_bg)')
     .eq('status', 'WAITING')
     .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
@@ -288,9 +289,7 @@ export const LobbyPage = () => {
       {/* Header */}
       <header className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary">
-            {profile?.username?.charAt(0).toUpperCase() ?? '?'}
-          </div>
+          {profile && <AvatarDisplay profile={profile} size="sm" />}
           <div>
             <h1 className="text-base font-bold leading-tight text-foreground">{profile?.username ?? 'Player'}</h1>
             <p className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -302,6 +301,9 @@ export const LobbyPage = () => {
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" className="rounded-full h-8 px-3 text-xs" onClick={() => navigate(`/profile/${profile?.id}`)}>
             <Trophy className="h-3.5 w-3.5 mr-1.5" /> Profile
+          </Button>
+          <Button variant="ghost" size="sm" className="rounded-full h-8 w-8 p-0" title="Edit Profile" onClick={() => navigate('/profile-edit')}>
+            <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button variant="ghost" size="sm" className="rounded-full h-8 w-8 p-0" onClick={logOut}>
             <LogOut className="h-3.5 w-3.5" />
@@ -407,9 +409,10 @@ export const LobbyPage = () => {
                         className="group rounded-xl border border-border/50 bg-secondary/20 p-3 transition-all hover:border-primary/30 hover:bg-secondary/30"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary shrink-0">
-                            {(room.host?.username ?? 'H').charAt(0).toUpperCase()}
-                          </div>
+                          {room.host
+                            ? <AvatarDisplay profile={room.host} size="sm" />
+                            : <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-sm font-bold text-primary shrink-0">H</div>
+                          }
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-sm truncate">{room.host?.username ?? 'Host'}</p>
                             <div className="flex items-center gap-1.5 mt-0.5">
@@ -530,9 +533,7 @@ export const LobbyPage = () => {
                     onClick={() => navigate(`/profile/${player.id}`)}
                   >
                     <div className="relative shrink-0">
-                      <div className="h-7 w-7 rounded-full bg-secondary flex items-center justify-center text-xs font-bold border border-border">
-                        {player.username.charAt(0).toUpperCase()}
-                      </div>
+                      <AvatarDisplay profile={player} size="xs" />
                       <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-background bg-emerald-500" />
                     </div>
                     <div className="flex-1 min-w-0">

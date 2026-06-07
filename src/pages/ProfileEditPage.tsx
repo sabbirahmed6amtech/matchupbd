@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { useNavigate } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,27 +12,34 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { AVATARS, AVATAR_BGS } from '@/lib/avatar'
 import type { Platform, Profile } from '@/types/domain'
-import { trackEvent } from '@/lib/analytics'
 
 const DIVISIONS = ['Div 1', 'Div 2', 'Div 3', 'Div 4', 'Div 5', 'Div 6', 'Div 7', 'Div 8', 'Div 9'] as const
 
 const schema = z.object({
-  username:      z.string().trim().min(3).max(24),
-  platform:      z.enum(['Mobile', 'PlayStation', 'Xbox', 'PC']),
-  efootball_id:  z.string().trim().max(32).optional().or(z.literal('')),
-  division:      z.string().optional(),
+  username: z.string().trim().min(3).max(24),
+  platform: z.enum(['Mobile', 'PlayStation', 'Xbox', 'PC']),
+  efootball_id: z.string().trim().max(32).optional().or(z.literal('')),
+  division: z.string().optional(),
   avatar_preset: z.string().optional(),
-  avatar_bg:     z.string().optional(),
+  avatar_bg: z.string().optional(),
 })
 
-type ProfileForm = z.infer<typeof schema>
+type ProfileEditForm = z.infer<typeof schema>
 
-export const ProfileSetupPage = () => {
+export const ProfileEditPage = () => {
   const navigate = useNavigate()
-  const { session, setProfile } = useAuthStore()
-  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<ProfileForm>({
+  const { session, profile, setProfile } = useAuthStore()
+
+  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<ProfileEditForm>({
     resolver: zodResolver(schema),
-    defaultValues: { platform: 'Mobile' },
+    defaultValues: {
+      username:       profile?.username       ?? '',
+      platform:       profile?.platform       ?? 'Mobile',
+      efootball_id:   profile?.efootball_id   ?? '',
+      division:       profile?.division       ?? '',
+      avatar_preset:  profile?.avatar_preset  ?? '',
+      avatar_bg:      profile?.avatar_bg      ?? '',
+    },
   })
 
   const previewProfile = {
@@ -40,29 +48,25 @@ export const ProfileSetupPage = () => {
     avatar_bg:     watch('avatar_bg')     || null,
   }
 
-  const onSubmit = async (values: ProfileForm) => {
+  const onSubmit = async (values: ProfileEditForm) => {
     if (!session?.user) return
 
-    const payload = {
-      id:            session.user.id,
-      username:      values.username,
-      platform:      values.platform as Platform,
-      efootball_id:  values.efootball_id  || null,
-      division:      values.division      || null,
-      avatar_preset: values.avatar_preset || null,
-      avatar_bg:     values.avatar_bg     || null,
-      country:       'Bangladesh',
-      reputation_score: 0,
-      matches_played:   0,
-      avatar_url:    session.user.user_metadata.avatar_url ?? null,
-    }
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        username:      values.username,
+        platform:      values.platform as Platform,
+        efootball_id:  values.efootball_id  || null,
+        division:      values.division      || null,
+        avatar_preset: values.avatar_preset || null,
+        avatar_bg:     values.avatar_bg     || null,
+      })
+      .eq('id', session.user.id)
 
-    const { error } = await supabase.from('profiles').upsert(payload)
     if (error) { alert(error.message); return }
 
     const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single<Profile>()
     setProfile(data)
-    trackEvent('profile_completed', { platform: values.platform })
     navigate('/lobby')
   }
 
@@ -70,9 +74,16 @@ export const ProfileSetupPage = () => {
     <MobileShell>
       <div className="flex flex-col items-center justify-center py-8">
         <div className="w-full max-w-md space-y-6">
-          <div className="space-y-2 text-center">
-            <h1 className="text-3xl font-bold tracking-tight">Setup Profile</h1>
-            <p className="text-sm text-muted-foreground">Complete your player info to enter the matchmaking lobby.</p>
+
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" className="rounded-full gap-2 -ml-3 h-8" onClick={() => navigate('/lobby')}>
+              <ArrowLeft className="h-4 w-4" /> Back
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight">Edit Profile</h1>
+            <p className="text-sm text-muted-foreground">Update your player information and avatar.</p>
           </div>
 
           {/* Live avatar preview */}
@@ -86,7 +97,7 @@ export const ProfileSetupPage = () => {
 
                 {/* Avatar selection */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium leading-none">Choose Avatar</label>
+                  <label className="text-sm font-medium leading-none">Avatar</label>
                   <div className="grid grid-cols-6 gap-2">
                     {AVATARS.map((a) => {
                       const selected = watch('avatar_preset') === a.id
@@ -173,11 +184,12 @@ export const ProfileSetupPage = () => {
                 </div>
 
                 <Button type="submit" disabled={isSubmitting} className="w-full gap-2 rounded-full">
-                  Save & Enter Lobby
+                  {isSubmitting ? 'Saving...' : 'Save Changes'}
                 </Button>
               </form>
             </CardContent>
           </Card>
+
         </div>
       </div>
     </MobileShell>
