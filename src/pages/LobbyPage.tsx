@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Filter } from 'bad-words'
 import { useNavigate } from 'react-router-dom'
-import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2 } from 'lucide-react'
+import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2, Loader2, Star, LogOut } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,13 @@ import { trackEvent } from '@/lib/analytics'
 
 const messageFilter = new Filter()
 const ACTIVE_STATUSES: RoomStatus[] = ['WAITING', 'MATCHED', 'PLAYING', 'RATING']
+
+const PLATFORM_LABELS: Record<Platform, string> = {
+  Mobile: '📱',
+  PlayStation: '🎮',
+  Xbox: '🕹️',
+  PC: '🖥️',
+}
 
 const fetchOnlineProfiles = async () => {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
@@ -168,18 +175,38 @@ export const LobbyPage = () => {
     mutationFn: async (room: MatchRoom) => {
       if (!session?.user.id || room.host_id === session.user.id) return
 
-      const { error } = await supabase
+      // Redirect if user already has an active room
+      const { data: existingRoom } = await supabase
+        .from('match_rooms')
+        .select('id')
+        .or(`host_id.eq.${session.user.id},guest_id.eq.${session.user.id}`)
+        .in('status', ACTIVE_STATUSES)
+        .maybeSingle<{ id: string }>()
+
+      if (existingRoom) {
+        navigate(`/rooms/${existingRoom.id}`)
+        return
+      }
+
+      // Update only if the room is still WAITING — select returns updated rows so we can detect races
+      const { data, error } = await supabase
         .from('match_rooms')
         .update({ guest_id: session.user.id, status: 'MATCHED' })
         .eq('id', room.id)
         .eq('status', 'WAITING')
+        .select('id')
 
       if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error('This room was just taken. Please try another one.')
+      }
+
       trackEvent('room_joined')
       navigate(`/rooms/${room.id}`)
     },
     onError: (error: unknown) => {
       alert(error instanceof Error ? error.message : 'Failed to join room')
+      queryClient.invalidateQueries({ queryKey: ['rooms'] })
     },
   })
 
@@ -207,170 +234,244 @@ export const LobbyPage = () => {
 
   return (
     <MobileShell>
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Match Lobby</h1>
-          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-            <Clock className="h-3.5 w-3.5" /> Target: find opponent under 30 seconds
-          </p>
+      {/* Header */}
+      <header className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary">
+            {profile?.username?.charAt(0).toUpperCase() ?? '?'}
+          </div>
+          <div>
+            <h1 className="text-base font-bold leading-tight text-foreground">{profile?.username ?? 'Player'}</h1>
+            <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <Circle className="h-1.5 w-1.5 fill-emerald-500 text-emerald-500" />
+              {onlinePlayers.length} online
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" className="rounded-full" onClick={() => navigate(`/profile/${profile?.id}`)}>
-            <Trophy className="h-4 w-4 mr-2" /> Profile
+          <Button variant="secondary" size="sm" className="rounded-full h-8 px-3 text-xs" onClick={() => navigate(`/profile/${profile?.id}`)}>
+            <Trophy className="h-3.5 w-3.5 mr-1.5" /> Profile
           </Button>
-          <Button variant="ghost" size="sm" className="rounded-full" onClick={logOut}>
-            Logout
+          <Button variant="ghost" size="sm" className="rounded-full h-8 w-8 p-0" onClick={logOut}>
+            <LogOut className="h-3.5 w-3.5" />
           </Button>
         </div>
       </header>
 
+      {/* Active room banner */}
       {activeRoomQuery.data && (
-        <Card className="border-primary/50 shadow-lg shadow-primary/10">
-          <CardHeader className="pb-3 text-center sm:text-left sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle className="text-primary flex items-center gap-2">
-                <Circle className="h-2 w-2 fill-primary animate-pulse" /> Active Room
-              </CardTitle>
-              <CardDescription className="mt-1">You already have an active match progressing.</CardDescription>
+        <Card className="border-primary/40 bg-primary/5 shadow-md">
+          <CardHeader className="py-3 px-4 flex-row items-center justify-between space-y-0">
+            <div className="flex items-center gap-2">
+              <Circle className="h-2 w-2 fill-primary text-primary animate-pulse" />
+              <div>
+                <CardTitle className="text-sm text-primary">Active Room</CardTitle>
+                <CardDescription className="text-xs">You have a match in progress.</CardDescription>
+              </div>
             </div>
-            <Button className="w-full sm:w-auto mt-4 sm:mt-0 rounded-full" onClick={() => navigate(`/rooms/${activeRoomQuery.data?.id}`)}>
-              Return to match
+            <Button size="sm" className="rounded-full h-8 text-xs shrink-0" onClick={() => navigate(`/rooms/${activeRoomQuery.data?.id}`)}>
+              Return →
             </Button>
           </CardHeader>
         </Card>
       )}
 
       <div className="grid gap-4 lg:grid-cols-12 content-start">
-        {/* MATCH REQUESTS (CENTER / MAIN FOCUS) */}
+        {/* MATCH CREATE + OPEN ROOMS — primary content, first on mobile */}
         <div className="order-1 lg:order-2 lg:col-span-5 space-y-4">
+          {/* Create Match */}
           <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Gamepad2 className="h-5 w-5 text-primary" /> Create Match
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Gamepad2 className="h-4 w-4 text-primary" /> Create Match
               </CardTitle>
-              <CardDescription>Setup your preferences</CardDescription>
+              <CardDescription className="text-xs flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Target: find opponent in under 30 seconds
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
                 <select
-                  className="h-10 rounded-md border border-input bg-background/50 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                  className="h-9 rounded-lg border border-input bg-background/50 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                   value={roomPlatform}
                   onChange={(e) => setRoomPlatform(e.target.value as Platform)}
                 >
-                  <option value="Mobile">Mobile</option>
-                  <option value="PlayStation">PlayStation</option>
-                  <option value="Xbox">Xbox</option>
-                  <option value="PC">PC</option>
+                  <option value="Mobile">📱 Mobile</option>
+                  <option value="PlayStation">🎮 PlayStation</option>
+                  <option value="Xbox">🕹️ Xbox</option>
+                  <option value="PC">🖥️ PC</option>
                 </select>
-                <Input className="bg-background/50" value={roomDivision} onChange={(e) => setRoomDivision(e.target.value)} placeholder="Division (optional)" />
+                <Input
+                  className="h-9 bg-background/50 rounded-lg text-sm"
+                  value={roomDivision}
+                  onChange={(e) => setRoomDivision(e.target.value)}
+                  placeholder="Division (optional)"
+                />
               </div>
-              <Button className="w-full gap-2 rounded-full font-semibold shadow-md active:scale-[0.98] transition-transform" size="lg" onClick={() => createRoomMutation.mutate()}>
-                <Plus className="h-5 w-5" /> Looking For Match
+              <Button
+                className="w-full gap-2 rounded-full font-semibold"
+                size="default"
+                disabled={createRoomMutation.isPending}
+                onClick={() => createRoomMutation.mutate()}
+              >
+                {createRoomMutation.isPending ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</>
+                ) : (
+                  <><Plus className="h-4 w-4" /> Looking For Match</>
+                )}
               </Button>
             </CardContent>
           </Card>
 
+          {/* Open Rooms */}
           <Card className="border-border/60">
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Open Rooms</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Open Rooms</CardTitle>
+                <Badge variant="secondary" className="text-xs font-normal">
+                  {roomsQuery.data?.length ?? 0} waiting
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {roomsQuery.data?.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-6">No open rooms right now. Create one!</p>
+              <div className="space-y-2">
+                {roomsQuery.isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : roomsQuery.data?.length === 0 ? (
+                  <div className="text-center py-8 space-y-2">
+                    <Gamepad2 className="h-8 w-8 text-muted-foreground/30 mx-auto" />
+                    <p className="text-sm text-muted-foreground">No open rooms. Create one!</p>
+                  </div>
                 ) : (
-                  (roomsQuery.data ?? []).map((room) => (
-                    <div key={room.id} className="group relative overflow-hidden rounded-xl border border-border/50 bg-secondary/20 p-4 transition-colors hover:border-primary/40 hover:bg-secondary/40">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-semibold text-foreground">{room.host?.username ?? 'Host'}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {room.platform} <span className="opacity-50">|</span> {room.division || 'Unranked'}
-                          </p>
-                        </div>
-                        <Badge variant="outline" className="bg-background/50">waiting</Badge>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={room.host_id === session?.user.id ? "secondary" : "default"}
-                        className="mt-4 w-full rounded-full"
-                        disabled={room.host_id === session?.user.id}
-                        onClick={() => joinRoomMutation.mutate(room)}
+                  (roomsQuery.data ?? []).map((room) => {
+                    const isHost = room.host_id === session?.user.id
+                    const isJoiningThis = joinRoomMutation.isPending && joinRoomMutation.variables?.id === room.id
+                    const repPct = room.host?.reputation_score !== undefined
+                      ? (room.host.reputation_score * 100).toFixed(0) + '%'
+                      : null
+
+                    return (
+                      <div
+                        key={room.id}
+                        className="group rounded-xl border border-border/50 bg-secondary/20 p-3 transition-all hover:border-primary/30 hover:bg-secondary/30"
                       >
-                        {room.host_id === session?.user.id ? "You are host" : "Join Match"}
-                      </Button>
-                    </div>
-                  ))
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary shrink-0">
+                            {(room.host?.username ?? 'H').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm truncate">{room.host?.username ?? 'Host'}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-xs text-muted-foreground">
+                                {PLATFORM_LABELS[room.platform as Platform] ?? ''} {room.platform}
+                              </span>
+                              <span className="text-muted-foreground/40 text-xs">·</span>
+                              <span className="text-xs text-muted-foreground">{room.division || 'Unranked'}</span>
+                            </div>
+                          </div>
+                          {repPct && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                              <Star className="h-3 w-3 text-amber-500 fill-amber-500" />
+                              {repPct}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={isHost ? 'secondary' : 'default'}
+                          className="mt-2.5 w-full rounded-full h-8 text-xs"
+                          disabled={isHost || joinRoomMutation.isPending}
+                          onClick={() => joinRoomMutation.mutate(room)}
+                        >
+                          {isJoiningThis ? (
+                            <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Joining...</>
+                          ) : isHost ? 'Your Room' : 'Join Match'}
+                        </Button>
+                      </div>
+                    )
+                  })
                 )}
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* GLOBAL CHAT (LEFT/BOTTOM) */}
-        <Card className="order-3 lg:order-1 lg:col-span-4 flex flex-col h-[500px] lg:h-auto border-border/60">
-          <CardHeader className="pb-3 border-b border-border/40">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <MessageSquare className="h-5 w-5 text-primary" /> Global Chat
+        {/* GLOBAL CHAT — second on mobile, first on desktop */}
+        <Card className="order-2 lg:order-1 lg:col-span-4 flex flex-col h-[420px] lg:h-auto border-border/60">
+          <CardHeader className="py-3 px-4 border-b border-border/40 shrink-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageSquare className="h-4 w-4 text-primary" /> Global Chat
             </CardTitle>
-            <CardDescription>Server-wide finding channel</CardDescription>
           </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto p-4 space-y-3">
-            {(chatQuery.data ?? []).map((message) => {
-              const isMe = message.user_id === session?.user.id
-              return (
-                <div key={message.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex flex-col max-w-[85%] ${isMe ? 'items-end' : 'items-start'}`}>
-                    <span className="text-[10px] text-muted-foreground mb-1 px-1">{message.profiles?.username}</span>
-                    <div className={`rounded-2xl px-3 py-2 text-sm ${isMe ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-secondary-foreground rounded-tl-sm'}`}>
-                      {message.message}
+          <CardContent className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
+            {(chatQuery.data ?? []).length === 0 ? (
+              <div className="h-full flex items-center justify-center">
+                <p className="text-xs text-muted-foreground">No messages yet. Say hello!</p>
+              </div>
+            ) : (
+              (chatQuery.data ?? []).map((message) => {
+                const isMe = message.user_id === session?.user.id
+                return (
+                  <div key={message.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex flex-col max-w-[85%] ${isMe ? 'items-end' : 'items-start'}`}>
+                      <span className="text-[10px] text-muted-foreground mb-0.5 px-1">{message.profiles?.username}</span>
+                      <div className={`rounded-2xl px-3 py-1.5 text-sm ${isMe ? 'bg-primary text-primary-foreground rounded-tr-sm' : 'bg-secondary text-secondary-foreground rounded-tl-sm'}`}>
+                        {message.message}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })
+            )}
             <div ref={chatBottomRef} />
           </CardContent>
-          <div className="p-3 border-t border-border/40 bg-card">
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessageMutation.mutate(chatText); }}>
+          <div className="p-3 border-t border-border/40 bg-card shrink-0">
+            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessageMutation.mutate(chatText) }}>
               <Input
-                className="rounded-full bg-background/50 h-10"
+                className="rounded-full bg-background/50 h-9 text-sm"
                 maxLength={300}
                 value={chatText}
                 onChange={(e) => setChatText(e.target.value)}
                 placeholder="Message lobby..."
               />
-              <Button type="submit" size="icon" className="rounded-full shrink-0 h-10 w-10" disabled={!chatText.trim()}>
-                <Send className="h-4 w-4" />
+              <Button type="submit" size="icon" className="rounded-full shrink-0 h-9 w-9" disabled={!chatText.trim() || sendMessageMutation.isPending}>
+                {sendMessageMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               </Button>
             </form>
           </div>
         </Card>
 
-        {/* ONLINE PLAYERS (RIGHT) */}
-        <Card className="order-2 lg:order-3 lg:col-span-3 border-border/60 max-h-[400px] flex flex-col">
-          <CardHeader className="pb-3 border-b border-border/40">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Users2 className="h-5 w-5 text-primary" /> Online ({onlinePlayers.length})
+        {/* ONLINE PLAYERS — third on mobile and desktop */}
+        <Card className="order-3 lg:col-span-3 border-border/60 max-h-[350px] lg:max-h-none flex flex-col">
+          <CardHeader className="py-3 px-4 border-b border-border/40 shrink-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users2 className="h-4 w-4 text-primary" /> Online
+              <Badge variant="secondary" className="ml-auto text-xs font-normal">{onlinePlayers.length}</Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto p-2">
-            <div className="space-y-1">
+          <CardContent className="flex-1 overflow-y-auto p-2 min-h-0">
+            <div className="space-y-0.5">
               {onlinePlayers.length === 0 ? (
-                <p className="text-sm text-center text-muted-foreground my-4">No one else online</p>
+                <p className="text-xs text-center text-muted-foreground py-6">No one else online</p>
               ) : (
                 onlinePlayers.map((player) => (
-                  <div key={player.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-secondary/40 transition-colors">
-                    <div className="relative">
-                      <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center text-xs font-medium border border-border">
+                  <div
+                    key={player.id}
+                    className="flex items-center gap-2.5 rounded-lg p-2 hover:bg-secondary/40 transition-colors cursor-pointer"
+                    onClick={() => navigate(`/profile/${player.id}`)}
+                  >
+                    <div className="relative shrink-0">
+                      <div className="h-7 w-7 rounded-full bg-secondary flex items-center justify-center text-xs font-bold border border-border">
                         {player.username.charAt(0).toUpperCase()}
                       </div>
-                      <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border border-background bg-emerald-500"></span>
+                      <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-background bg-emerald-500" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{player.username}</p>
+                      <p className="text-xs font-medium truncate">{player.username}</p>
                       <p className="text-[10px] text-muted-foreground truncate">
-                        {player.platform}
+                        {PLATFORM_LABELS[player.platform] ?? ''} {player.platform}
                       </p>
                     </div>
                   </div>
