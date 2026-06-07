@@ -126,29 +126,22 @@ export const MatchRoomPage = () => {
         rating: value,
       })
       if (error) throw error
+
+      // Attempt close immediately — the function only closes when both have rated,
+      // so this is safe to call after every submission.
+      await supabase.rpc('close_room_if_fully_rated', { input_room_id: roomId })
+
       trackEvent('rating_submitted', { value })
     },
   })
 
   const myRating = ratings.find((rating) => rating.from_user_id === session?.user.id)
-  const bothRated = ratings.length >= 2
 
   useEffect(() => {
     if (room?.status === 'CLOSED') {
       navigate('/lobby')
     }
   }, [navigate, room?.status])
-
-  useEffect(() => {
-    if (!roomId || !room || room.status !== 'RATING' || !bothRated) return
-
-    const closeRoom = async () => {
-      await supabase.rpc('close_room_if_fully_rated', { input_room_id: roomId })
-      queryClient.invalidateQueries({ queryKey: ['room', roomId] })
-    }
-
-    void closeRoom()
-  }, [bothRated, queryClient, room, roomId])
 
   if (roomQuery.isLoading) {
     return (
@@ -311,12 +304,14 @@ export const MatchRoomPage = () => {
 
               {room.status === 'RATING' && (
                 <div className="w-full space-y-3">
-                  <p className="text-sm font-semibold text-center">Rate your opponent</p>
+                  <p className="text-sm font-semibold text-center">
+                    {myRating ? 'Rating submitted!' : 'Rate your opponent'}
+                  </p>
                   <div className="grid grid-cols-3 gap-2">
                     <Button
                       variant={myRating?.rating === 'GOOD' ? 'default' : 'secondary'}
                       className={`rounded-xl h-10 text-sm font-medium ${myRating?.rating === 'GOOD' ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : ''}`}
-                      disabled={submitRating.isPending}
+                      disabled={submitRating.isPending || Boolean(myRating)}
                       onClick={() => submitRating.mutate('GOOD')}
                     >
                       👍 Good
@@ -324,7 +319,7 @@ export const MatchRoomPage = () => {
                     <Button
                       variant={myRating?.rating === 'NEUTRAL' ? 'default' : 'secondary'}
                       className={`rounded-xl h-10 text-sm font-medium ${myRating?.rating === 'NEUTRAL' ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : ''}`}
-                      disabled={submitRating.isPending}
+                      disabled={submitRating.isPending || Boolean(myRating)}
                       onClick={() => submitRating.mutate('NEUTRAL')}
                     >
                       😐 OK
@@ -332,21 +327,21 @@ export const MatchRoomPage = () => {
                     <Button
                       variant={myRating?.rating === 'BAD' ? 'destructive' : 'secondary'}
                       className="rounded-xl h-10 text-sm font-medium"
-                      disabled={submitRating.isPending}
+                      disabled={submitRating.isPending || Boolean(myRating)}
                       onClick={() => submitRating.mutate('BAD')}
                     >
                       👎 Bad
                     </Button>
                   </div>
-                  <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                    {bothRated ? (
-                      <><Loader2 className="h-3 w-3 animate-spin" /> Closing room...</>
-                    ) : myRating ? (
-                      <><Clock className="h-3 w-3" /> Waiting for opponent to rate.</>
-                    ) : (
-                      <><Clock className="h-3 w-3" /> Please rate to close the room.</>
-                    )}
-                  </div>
+                  {myRating ? (
+                    <Button className="w-full rounded-full h-10" onClick={() => navigate('/lobby')}>
+                      Return to Lobby
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-center text-muted-foreground">
+                      Rate your opponent — you can leave right after.
+                    </p>
+                  )}
                 </div>
               )}
             </CardFooter>
