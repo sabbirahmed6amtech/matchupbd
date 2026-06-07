@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Filter } from 'bad-words'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Swords, Flag, MessageCircle, Send, Star, Clock, Loader2, Crown, Shield } from 'lucide-react'
+import { ArrowLeft, Swords, Flag, MessageCircle, Send, Star, Clock, Loader2, Crown, Shield, ChevronUp } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import type { MatchRoom, Rating, RatingValue, RoomMessage } from '@/types/domain
 import { trackEvent } from '@/lib/analytics'
 
 const messageFilter = new Filter()
+const CHAT_PAGE_SIZE = 30
 
 const STATUS_COLORS: Record<string, string> = {
   WAITING: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30',
@@ -35,16 +36,6 @@ const fetchRoom = async (roomId: string) => {
   return data as MatchRoom
 }
 
-const fetchRoomMessages = async (roomId: string) => {
-  const { data } = await supabase
-    .from('room_messages')
-    .select('*, profiles:profiles(id,username)')
-    .eq('room_id', roomId)
-    .order('created_at', { ascending: true })
-    .limit(200)
-  return (data ?? []) as RoomMessage[]
-}
-
 const fetchRatings = async (roomId: string) => {
   const { data } = await supabase.from('ratings').select('*').eq('room_id', roomId)
   return (data ?? []) as Rating[]
@@ -56,34 +47,95 @@ export const MatchRoomPage = () => {
   const queryClient = useQueryClient()
   const { session } = useAuthStore()
   const [chatText, setChatText] = useState('')
+
+  // Chat pagination state
+  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([])
+  const [chatHasMore, setChatHasMore] = useState(false)
+  const [chatLoadingMore, setChatLoadingMore] = useState(false)
+  const chatOldestRef = useRef<string | undefined>(undefined)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatBottomRef = useRef<HTMLDivElement>(null)
 
+  // Scroll to bottom only when the newest message changes (not on prepend)
+  const lastMessageId = roomMessages[roomMessages.length - 1]?.id
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lastMessageId])
+
+  // Initial room messages load
+  useEffect(() => {
+    if (!roomId) return
+    const load = async () => {
+      const { data } = await supabase
+        .from('room_messages')
+        .select('*, profiles:profiles(id,username)')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: false })
+        .limit(CHAT_PAGE_SIZE)
+
+      const msgs = ((data ?? []).reverse()) as RoomMessage[]
+      setRoomMessages(msgs)
+      setChatHasMore(msgs.length >= CHAT_PAGE_SIZE)
+      if (msgs.length > 0) chatOldestRef.current = msgs[0].created_at
+    }
+    void load()
+  }, [roomId])
+
+  // Load older messages (prepend) with scroll-position preservation
+  const loadOlderMessages = useCallback(async () => {
+    if (!chatOldestRef.current || chatLoadingMore) return
+    const container = chatContainerRef.current
+    const prevScrollHeight = container?.scrollHeight ?? 0
+
+    setChatLoadingMore(true)
+    const { data } = await supabase
+      .from('room_messages')
+      .select('*, profiles:profiles(id,username)')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: false })
+      .lt('created_at', chatOldestRef.current)
+      .limit(CHAT_PAGE_SIZE)
+
+    const older = ((data ?? []).reverse()) as RoomMessage[]
+    setChatLoadingMore(false)
+
+    if (older.length > 0) {
+      chatOldestRef.current = older[0].created_at
+      setRoomMessages((prev: RoomMessage[]) => [...older, ...prev])
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - prevScrollHeight
+      })
+    }
+    setChatHasMore(older.length >= CHAT_PAGE_SIZE)
+  }, [chatLoadingMore, roomId])
+
   const roomQuery = useQuery({ queryKey: ['room', roomId], queryFn: () => fetchRoom(roomId), enabled: Boolean(roomId) })
-  const roomMessagesQuery = useQuery({ queryKey: ['room-messages', roomId], queryFn: () => fetchRoomMessages(roomId), enabled: Boolean(roomId) })
   const ratingsQuery = useQuery({ queryKey: ['room-ratings', roomId], queryFn: () => fetchRatings(roomId), enabled: Boolean(roomId) })
 
+  // Real-time subscriptions
   useEffect(() => {
+    if (!roomId) return
     const channel = supabase
       .channel(`room-${roomId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_rooms', filter: `id=eq.${roomId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['room', roomId] })
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_messages', filter: `room_id=eq.${roomId}` }, () => {
-        queryClient.invalidateQueries({ queryKey: ['room-messages', roomId] })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages', filter: `room_id=eq.${roomId}` }, async (payload: { new: Record<string, unknown> }) => {
+        const { data } = await supabase
+          .from('room_messages')
+          .select('*, profiles:profiles(id,username)')
+          .eq('id', payload.new['id'] as string)
+          .single()
+
+        if (data) setRoomMessages((prev: RoomMessage[]) => [...prev, data as RoomMessage])
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ratings', filter: `room_id=eq.${roomId}` }, () => {
         queryClient.invalidateQueries({ queryKey: ['room-ratings', roomId] })
       })
       .subscribe()
 
-    return () => {
-      void supabase.removeChannel(channel)
-    }
+    return () => { void supabase.removeChannel(channel) }
   }, [queryClient, roomId])
-
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [roomMessagesQuery.data])
 
   const room = roomQuery.data
   const ratings = ratingsQuery.data ?? []
@@ -126,29 +178,17 @@ export const MatchRoomPage = () => {
         rating: value,
       })
       if (error) throw error
+
+      await supabase.rpc('close_room_if_fully_rated', { input_room_id: roomId })
       trackEvent('rating_submitted', { value })
     },
   })
 
   const myRating = ratings.find((rating) => rating.from_user_id === session?.user.id)
-  const bothRated = ratings.length >= 2
 
   useEffect(() => {
-    if (room?.status === 'CLOSED') {
-      navigate('/lobby')
-    }
+    if (room?.status === 'CLOSED') navigate('/lobby')
   }, [navigate, room?.status])
-
-  useEffect(() => {
-    if (!roomId || !room || room.status !== 'RATING' || !bothRated) return
-
-    const closeRoom = async () => {
-      await supabase.rpc('close_room_if_fully_rated', { input_room_id: roomId })
-      queryClient.invalidateQueries({ queryKey: ['room', roomId] })
-    }
-
-    void closeRoom()
-  }, [bothRated, queryClient, room, roomId])
 
   if (roomQuery.isLoading) {
     return (
@@ -176,7 +216,6 @@ export const MatchRoomPage = () => {
 
   return (
     <MobileShell>
-      {/* Header */}
       <header className="flex items-center justify-between mb-1">
         <Button variant="ghost" size="sm" className="rounded-full gap-2 -ml-3 h-8" onClick={() => navigate('/lobby')}>
           <ArrowLeft className="h-4 w-4" /> Lobby
@@ -200,7 +239,6 @@ export const MatchRoomPage = () => {
             </CardHeader>
 
             <CardContent className="pt-3 pb-2">
-              {/* Players */}
               <div className="flex items-stretch gap-3 sm:gap-6">
                 {/* Me */}
                 <div className="flex-1 flex flex-col items-center p-3 sm:p-4 rounded-xl bg-primary/5 border border-primary/20">
@@ -224,7 +262,6 @@ export const MatchRoomPage = () => {
                   </div>
                 </div>
 
-                {/* VS divider */}
                 <div className="flex flex-col items-center justify-center shrink-0">
                   <div className="text-xs font-black text-muted-foreground/40 bg-background/60 border border-border/30 px-2 py-1 rounded-md">VS</div>
                 </div>
@@ -311,12 +348,14 @@ export const MatchRoomPage = () => {
 
               {room.status === 'RATING' && (
                 <div className="w-full space-y-3">
-                  <p className="text-sm font-semibold text-center">Rate your opponent</p>
+                  <p className="text-sm font-semibold text-center">
+                    {myRating ? 'Rating submitted!' : 'Rate your opponent'}
+                  </p>
                   <div className="grid grid-cols-3 gap-2">
                     <Button
                       variant={myRating?.rating === 'GOOD' ? 'default' : 'secondary'}
                       className={`rounded-xl h-10 text-sm font-medium ${myRating?.rating === 'GOOD' ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : ''}`}
-                      disabled={submitRating.isPending}
+                      disabled={submitRating.isPending || Boolean(myRating)}
                       onClick={() => submitRating.mutate('GOOD')}
                     >
                       👍 Good
@@ -324,7 +363,7 @@ export const MatchRoomPage = () => {
                     <Button
                       variant={myRating?.rating === 'NEUTRAL' ? 'default' : 'secondary'}
                       className={`rounded-xl h-10 text-sm font-medium ${myRating?.rating === 'NEUTRAL' ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm' : ''}`}
-                      disabled={submitRating.isPending}
+                      disabled={submitRating.isPending || Boolean(myRating)}
                       onClick={() => submitRating.mutate('NEUTRAL')}
                     >
                       😐 OK
@@ -332,21 +371,21 @@ export const MatchRoomPage = () => {
                     <Button
                       variant={myRating?.rating === 'BAD' ? 'destructive' : 'secondary'}
                       className="rounded-xl h-10 text-sm font-medium"
-                      disabled={submitRating.isPending}
+                      disabled={submitRating.isPending || Boolean(myRating)}
                       onClick={() => submitRating.mutate('BAD')}
                     >
                       👎 Bad
                     </Button>
                   </div>
-                  <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                    {bothRated ? (
-                      <><Loader2 className="h-3 w-3 animate-spin" /> Closing room...</>
-                    ) : myRating ? (
-                      <><Clock className="h-3 w-3" /> Waiting for opponent to rate.</>
-                    ) : (
-                      <><Clock className="h-3 w-3" /> Please rate to close the room.</>
-                    )}
-                  </div>
+                  {myRating ? (
+                    <Button className="w-full rounded-full h-10" onClick={() => navigate('/lobby')}>
+                      Return to Lobby
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-center text-muted-foreground">
+                      Rate your opponent — you can leave right after.
+                    </p>
+                  )}
                 </div>
               )}
             </CardFooter>
@@ -361,14 +400,31 @@ export const MatchRoomPage = () => {
                 <MessageCircle className="h-4 w-4 text-primary" /> Private Chat
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto p-3 space-y-2 bg-background/20 min-h-0">
-              {(roomMessagesQuery.data ?? []).length === 0 ? (
+
+            <CardContent ref={chatContainerRef} className="flex-1 overflow-y-auto p-3 space-y-2 bg-background/20 min-h-0">
+              {/* Load older button */}
+              {chatHasMore && (
+                <div className="flex justify-center pb-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground gap-1 rounded-full"
+                    disabled={chatLoadingMore}
+                    onClick={loadOlderMessages}
+                  >
+                    {chatLoadingMore ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronUp className="h-3 w-3" />}
+                  {chatLoadingMore ? 'Loading...' : 'Load older'}
+                  </Button>
+                </div>
+              )}
+
+              {roomMessages.length === 0 && !chatHasMore ? (
                 <div className="h-full flex flex-col justify-center items-center text-muted-foreground opacity-60 gap-2">
                   <MessageCircle className="h-8 w-8" />
                   <p className="text-xs text-center">No messages yet.<br/>Share your eFootball ID to start!</p>
                 </div>
               ) : (
-                (roomMessagesQuery.data ?? []).map((message) => {
+                roomMessages.map((message) => {
                   const isMe = message.user_id === session?.user.id
                   return (
                     <div key={message.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
@@ -384,6 +440,7 @@ export const MatchRoomPage = () => {
               )}
               <div ref={chatBottomRef} />
             </CardContent>
+
             <div className="p-3 border-t border-border/40 bg-card shrink-0">
               <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessage.mutate(chatText) }}>
                 <Input
