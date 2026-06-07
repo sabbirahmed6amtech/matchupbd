@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Filter } from 'bad-words'
 import { useNavigate } from 'react-router-dom'
-import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2, Loader2, Star, LogOut } from 'lucide-react'
+import { Circle, Plus, MessageSquare, Users2, Trophy, Clock, Send, Gamepad2, Loader2, Star, LogOut, ChevronUp } from 'lucide-react'
 import { MobileShell } from '@/components/layout/mobile-shell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,7 @@ import { trackEvent } from '@/lib/analytics'
 
 const messageFilter = new Filter()
 const ACTIVE_STATUSES: RoomStatus[] = ['WAITING', 'MATCHED', 'PLAYING', 'RATING']
+const CHAT_PAGE_SIZE = 30
 
 const PLATFORM_LABELS: Record<Platform, string> = {
   Mobile: '📱',
@@ -39,16 +40,6 @@ const fetchRooms = async () => {
   return (data ?? []) as MatchRoom[]
 }
 
-const fetchGlobalChat = async () => {
-  const { data } = await supabase
-    .from('chat_messages')
-    .select('*, profiles:profiles(id,username,avatar_url,platform)')
-    .order('created_at', { ascending: true })
-    .limit(100)
-
-  return (data ?? []) as ChatMessage[]
-}
-
 export const LobbyPage = () => {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -56,11 +47,68 @@ export const LobbyPage = () => {
   const [chatText, setChatText] = useState('')
   const [roomPlatform, setRoomPlatform] = useState<Platform>(profile?.platform ?? 'Mobile')
   const [roomDivision, setRoomDivision] = useState(profile?.division ?? '')
+
+  // Chat pagination state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatHasMore, setChatHasMore] = useState(false)
+  const [chatLoadingMore, setChatLoadingMore] = useState(false)
+  const chatOldestRef = useRef<string | undefined>(undefined)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
   const chatBottomRef = useRef<HTMLDivElement>(null)
+
+  // Scroll to bottom only when the newest message changes (not on prepend)
+  const lastMessageId = chatMessages[chatMessages.length - 1]?.id
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lastMessageId])
+
+  // Initial chat load
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from('chat_messages')
+        .select('*, profiles:profiles(id,username,avatar_url,platform)')
+        .order('created_at', { ascending: false })
+        .limit(CHAT_PAGE_SIZE)
+
+      const msgs = ((data ?? []).reverse()) as ChatMessage[]
+      setChatMessages(msgs)
+      setChatHasMore(msgs.length >= CHAT_PAGE_SIZE)
+      if (msgs.length > 0) chatOldestRef.current = msgs[0].created_at
+    }
+    void load()
+  }, [])
+
+  // Load older chat messages (prepend) with scroll-position preservation
+  const loadOlderChat = useCallback(async () => {
+    if (!chatOldestRef.current || chatLoadingMore) return
+    const container = chatContainerRef.current
+    const prevScrollHeight = container?.scrollHeight ?? 0
+
+    setChatLoadingMore(true)
+    const { data } = await supabase
+      .from('chat_messages')
+      .select('*, profiles:profiles(id,username,avatar_url,platform)')
+      .order('created_at', { ascending: false })
+      .lt('created_at', chatOldestRef.current)
+      .limit(CHAT_PAGE_SIZE)
+
+    const older = ((data ?? []).reverse()) as ChatMessage[]
+    setChatLoadingMore(false)
+
+    if (older.length > 0) {
+      chatOldestRef.current = older[0].created_at
+      setChatMessages((prev: ChatMessage[]) => [...older, ...prev])
+      // Restore scroll position so the view doesn't jump
+      requestAnimationFrame(() => {
+        if (container) container.scrollTop = container.scrollHeight - prevScrollHeight
+      })
+    }
+    setChatHasMore(older.length >= CHAT_PAGE_SIZE)
+  }, [chatLoadingMore])
 
   const onlineProfilesQuery = useQuery({ queryKey: ['online-profiles'], queryFn: fetchOnlineProfiles, refetchInterval: 15000 })
   const roomsQuery = useQuery({ queryKey: ['rooms'], queryFn: fetchRooms, refetchInterval: 5000 })
-  const chatQuery = useQuery({ queryKey: ['global-chat'], queryFn: fetchGlobalChat, refetchInterval: 3000 })
 
   const activeRoomQuery = useQuery({
     queryKey: ['my-active-room', session?.user.id],
@@ -79,13 +127,12 @@ export const LobbyPage = () => {
     refetchInterval: 4000,
   })
 
+  // Online presence heartbeat
   useEffect(() => {
     if (!profile || !session?.user) return
 
     const channel = supabase.channel('online-presence', {
-      config: {
-        presence: { key: session.user.id },
-      },
+      config: { presence: { key: session.user.id } },
     })
 
     channel
@@ -99,31 +146,30 @@ export const LobbyPage = () => {
         }
       })
 
-    return () => {
-      void supabase.removeChannel(channel)
-    }
+    return () => { void supabase.removeChannel(channel) }
   }, [profile, queryClient, session?.user])
 
+  // Real-time: rooms list + active room + incoming chat messages
   useEffect(() => {
-    const chatChannel = supabase
-      .channel('global-chat-room')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['global-chat'] })
-      })
+    const channel = supabase
+      .channel('lobby-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_rooms' }, () => {
         queryClient.invalidateQueries({ queryKey: ['rooms'] })
         queryClient.invalidateQueries({ queryKey: ['my-active-room'] })
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, async (payload: { new: Record<string, unknown> }) => {
+        const { data } = await supabase
+          .from('chat_messages')
+          .select('*, profiles:profiles(id,username,avatar_url,platform)')
+          .eq('id', payload.new['id'] as string)
+          .single()
+
+        if (data) setChatMessages((prev: ChatMessage[]) => [...prev, data as ChatMessage])
+      })
       .subscribe()
 
-    return () => {
-      void supabase.removeChannel(chatChannel)
-    }
+    return () => { void supabase.removeChannel(channel) }
   }, [queryClient])
-
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatQuery.data])
 
   const createRoomMutation = useMutation({
     mutationFn: async () => {
@@ -175,7 +221,6 @@ export const LobbyPage = () => {
     mutationFn: async (room: MatchRoom) => {
       if (!session?.user.id || room.host_id === session.user.id) return
 
-      // Redirect if user already has an active room
       const { data: existingRoom } = await supabase
         .from('match_rooms')
         .select('id')
@@ -188,7 +233,6 @@ export const LobbyPage = () => {
         return
       }
 
-      // Update only if the room is still WAITING — select returns updated rows so we can detect races
       const { data, error } = await supabase
         .from('match_rooms')
         .update({ guest_id: session.user.id, status: 'MATCHED' })
@@ -277,9 +321,8 @@ export const LobbyPage = () => {
       )}
 
       <div className="grid gap-4 lg:grid-cols-12 content-start">
-        {/* MATCH CREATE + OPEN ROOMS — primary content, first on mobile */}
+        {/* MATCH CREATE + OPEN ROOMS */}
         <div className="order-1 lg:order-2 lg:col-span-5 space-y-4">
-          {/* Create Match */}
           <Card className="border-border/60 bg-card/40 backdrop-blur-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
@@ -323,7 +366,6 @@ export const LobbyPage = () => {
             </CardContent>
           </Card>
 
-          {/* Open Rooms */}
           <Card className="border-border/60">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -398,20 +440,37 @@ export const LobbyPage = () => {
           </Card>
         </div>
 
-        {/* GLOBAL CHAT — second on mobile, first on desktop */}
+        {/* GLOBAL CHAT */}
         <Card className="order-2 lg:order-1 lg:col-span-4 flex flex-col h-[420px] lg:h-auto border-border/60">
           <CardHeader className="py-3 px-4 border-b border-border/40 shrink-0">
             <CardTitle className="flex items-center gap-2 text-base">
               <MessageSquare className="h-4 w-4 text-primary" /> Global Chat
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
-            {(chatQuery.data ?? []).length === 0 ? (
+
+          <CardContent ref={chatContainerRef} className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
+            {/* Load older button */}
+            {chatHasMore && (
+              <div className="flex justify-center pb-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-muted-foreground gap-1 rounded-full"
+                  disabled={chatLoadingMore}
+                  onClick={loadOlderChat}
+                >
+                  {chatLoadingMore ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronUp className="h-3 w-3" />}
+                  {chatLoadingMore ? 'Loading...' : 'Load older'}
+                </Button>
+              </div>
+            )}
+
+            {chatMessages.length === 0 && !chatHasMore ? (
               <div className="h-full flex items-center justify-center">
                 <p className="text-xs text-muted-foreground">No messages yet. Say hello!</p>
               </div>
             ) : (
-              (chatQuery.data ?? []).map((message) => {
+              chatMessages.map((message) => {
                 const isMe = message.user_id === session?.user.id
                 return (
                   <div key={message.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
@@ -427,6 +486,7 @@ export const LobbyPage = () => {
             )}
             <div ref={chatBottomRef} />
           </CardContent>
+
           <div className="p-3 border-t border-border/40 bg-card shrink-0">
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); sendMessageMutation.mutate(chatText) }}>
               <Input
@@ -443,7 +503,7 @@ export const LobbyPage = () => {
           </div>
         </Card>
 
-        {/* ONLINE PLAYERS — third on mobile and desktop */}
+        {/* ONLINE PLAYERS */}
         <Card className="order-3 lg:col-span-3 border-border/60 max-h-[350px] lg:max-h-none flex flex-col">
           <CardHeader className="py-3 px-4 border-b border-border/40 shrink-0">
             <CardTitle className="flex items-center gap-2 text-base">
